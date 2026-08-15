@@ -1,17 +1,105 @@
 ﻿#Requires -Version 5.0
-# 烽火地带 弹道录制工具
+# 烽火地带 弹道录制工具 (Raw Input API)
 
-Add-Type @"
+Add-Type -AssemblyName System.Windows.Forms
+
+Add-Type @'
+using System;
 using System.Runtime.InteropServices;
-public class WinInput {
+using System.Windows.Forms;
+using System.Collections.Generic;
+using System.Diagnostics;
+
+public class RawMouseCapture : Form {
+
     [StructLayout(LayoutKind.Sequential)]
-    public struct POINT { public int X; public int Y; }
+    struct RAWINPUTDEVICE {
+        public ushort usUsagePage;
+        public ushort usUsage;
+        public uint dwFlags;
+        public IntPtr hwndTarget;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct RAWINPUTHEADER {
+        public uint dwType;
+        public uint dwSize;
+        public IntPtr hDevice;
+        public IntPtr wParam;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct RAWMOUSE {
+        public ushort usFlags;
+        public ushort _pad;
+        public uint ulButtons;
+        public uint ulRawButtons;
+        public int lLastX;
+        public int lLastY;
+        public uint ulExtraInformation;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct RAWINPUT {
+        public RAWINPUTHEADER header;
+        public RAWMOUSE mouse;
+    }
+
+    [DllImport("user32.dll", SetLastError=true)]
+    static extern bool RegisterRawInputDevices(
+        [In] RAWINPUTDEVICE[] pRawInputDevices, uint uiNumDevices, uint cbSize);
+
     [DllImport("user32.dll")]
-    public static extern bool GetCursorPos(out POINT p);
+    static extern uint GetRawInputData(
+        IntPtr hRawInput, uint uiCommand,
+        out RAWINPUT pData, ref uint pcbSize, uint cbSizeHeader);
+
     [DllImport("user32.dll")]
     public static extern short GetAsyncKeyState(int vKey);
+
+    const int WM_INPUT = 0x00FF;
+    const uint RIDEV_INPUTSINK = 0x00000100;
+    const uint RID_INPUT = 0x10000003;
+    const uint RIM_TYPEMOUSE = 0;
+
+    public volatile bool Recording;
+    public Stopwatch Timer = new Stopwatch();
+    public List<int[]> Deltas = new List<int[]>();
+
+    protected override void WndProc(ref Message m) {
+        if (m.Msg == WM_INPUT && Recording) {
+            uint size = (uint)Marshal.SizeOf(typeof(RAWINPUT));
+            RAWINPUT ri;
+            if (GetRawInputData(m.LParam, RID_INPUT, out ri, ref size,
+                (uint)Marshal.SizeOf(typeof(RAWINPUTHEADER))) > 0
+                && ri.header.dwType == RIM_TYPEMOUSE) {
+                int dx = ri.mouse.lLastX;
+                int dy = ri.mouse.lLastY;
+                if (dx != 0 || dy != 0)
+                    Deltas.Add(new int[] { dx, dy, (int)Timer.ElapsedMilliseconds });
+            }
+        }
+        base.WndProc(ref m);
+    }
+
+    public bool Register() {
+        var rid = new RAWINPUTDEVICE[1];
+        rid[0].usUsagePage = 0x01;
+        rid[0].usUsage    = 0x02;
+        rid[0].dwFlags    = RIDEV_INPUTSINK;
+        rid[0].hwndTarget = Handle;
+        return RegisterRawInputDevices(rid, 1, (uint)Marshal.SizeOf(typeof(RAWINPUTDEVICE)));
+    }
+
+    public RawMouseCapture() {
+        FormBorderStyle = FormBorderStyle.None;
+        ShowInTaskbar   = false;
+        Size            = new System.Drawing.Size(1, 1);
+        Location        = new System.Drawing.Point(-200, -200);
+        Opacity         = 0;
+    }
 }
-"@
+'@
 
 $host.UI.RawUI.WindowTitle = "烽火地带 弹道录制"
 
@@ -19,52 +107,75 @@ Write-Host ""
 Write-Host "  烽火地带 弹道录制工具" -ForegroundColor Cyan
 Write-Host "------------------------------------" -ForegroundColor DarkGray
 Write-Host ""
-Write-Host " 【重要】游戏必须设置为窗口模式" -ForegroundColor Yellow
+Write-Host " 【重要】游戏必须设置为窗口模式或全屏窗口化" -ForegroundColor Yellow
 Write-Host ""
 Write-Host " 流程："
 Write-Host "  1. 训练场瞄准靶子，关闭压枪器"
 Write-Host "  2. 此窗口按 Enter，切换回游戏"
 Write-Host "  3. 按一下 Scroll Lock 键（Prt Sc 旁边）开始"
-Write-Host "  4. 立刻开枪，打完一梭子"
+Write-Host "  4. 立刻开枪，打完一梭子（边打边手动压枪）"
 Write-Host "  5. 再按 Scroll Lock 停止（或8秒后自动停）"
 Write-Host "  6. 回到浏览器点「载入录制」"
 Write-Host ""
+
+$capture = New-Object RawMouseCapture
+$capture.Show()
+[System.Windows.Forms.Application]::DoEvents()
+
+if (-not $capture.Register()) {
+    Write-Host " 注册 Raw Input 失败，请以管理员身份运行" -ForegroundColor Red
+    $null = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+    exit
+}
 
 Read-Host " 按 Enter 开始等待..."
 Write-Host ""
 Write-Host " 切换到游戏，按 Scroll Lock 开始录制" -ForegroundColor Cyan
 
-# 等 Scroll Lock 按下（VK_SCROLL = 0x91）
-while (-not ([WinInput]::GetAsyncKeyState(0x91) -band 0x8000)) {
+# 等 Scroll Lock 松开（防止立即触发）
+while ([RawMouseCapture]::GetAsyncKeyState(0x91) -band 0x8000) {
+    [System.Windows.Forms.Application]::DoEvents()
+    Start-Sleep -Milliseconds 10
+}
+
+# 等 Scroll Lock 按下
+while (-not ([RawMouseCapture]::GetAsyncKeyState(0x91) -band 0x8000)) {
+    [System.Windows.Forms.Application]::DoEvents()
     Start-Sleep -Milliseconds 10
 }
 Start-Sleep -Milliseconds 200
 
 Write-Host " 录制开始！打完后再按一次 Scroll Lock 结束（最长8秒）" -ForegroundColor Green
 
-$pts = [System.Collections.Generic.List[PSCustomObject]]::new()
-$ox = 0; $oy = 0; $first = $true
-$t0 = [DateTime]::Now
+$capture.Timer.Restart()
+$capture.Recording = $true
 
-while (([DateTime]::Now - $t0).TotalSeconds -lt 8) {
-    if ([WinInput]::GetAsyncKeyState(0x91) -band 0x8000) { break }
-    $p = New-Object WinInput+POINT
-    $null = [WinInput]::GetCursorPos([ref]$p)
-    if ($first) { $ox = $p.X; $oy = $p.Y; $first = $false }
-    $ms = [int](([DateTime]::Now - $t0).TotalMilliseconds)
-    $pts.Add([PSCustomObject]@{ x = ($p.X - $ox); y = ($p.Y - $oy); t = $ms })
-    Start-Sleep -Milliseconds 16
+$deadline = [DateTime]::Now.AddSeconds(8)
+while ([DateTime]::Now -lt $deadline) {
+    if ([RawMouseCapture]::GetAsyncKeyState(0x91) -band 0x8000) { break }
+    [System.Windows.Forms.Application]::DoEvents()
+    Start-Sleep -Milliseconds 5
 }
 
-Write-Host " 录制完成：$($pts.Count) 个数据点" -ForegroundColor Green
+$capture.Recording = $false
+$deltas = $capture.Deltas
+$capture.Close()
 
-if ($pts.Count -lt 5) {
+Write-Host " 录制完成：$($deltas.Count) 个原始事件" -ForegroundColor Green
+
+if ($deltas.Count -lt 5) {
     Write-Host " 数据太少，请重试" -ForegroundColor Red
     $null = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
     exit
 }
 
-$lines = $pts | ForEach-Object { '{"x":' + $_.x + ',"y":' + $_.y + ',"t":' + $_.t + '}' }
+# 累加并取反：压枪方向 -> 后坐力方向
+$cumX = 0; $cumY = 0
+$lines = $deltas | ForEach-Object {
+    $cumX += -$_[0]
+    $cumY += -$_[1]
+    '{"x":' + $cumX + ',"y":' + $cumY + ',"t":' + $_[2] + '}'
+}
 $json = "[" + ($lines -join ",") + "]"
 
 $savePath = Join-Path $PSScriptRoot "trajectory.json"
