@@ -431,11 +431,12 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;
       <div style="padding:7px 12px;border-bottom:1px solid var(--border);font-size:.75rem;color:var(--sub);display:flex;align-items:center;gap:6px;flex-wrap:wrap">
         <span id="canvasModeLbl">🎯 补偿弹道预览</span>
         <button type="button" onclick="document.getElementById('imgUploadInput').click()" style="padding:2px 9px;border-radius:6px;border:1px solid rgba(0,194,255,.5);background:transparent;color:#00C2FF;font-size:.7rem;cursor:pointer">📷 上传弹道图</button>
-        <input type="file" id="imgUploadInput" accept="image/*" style="display:none" onchange="analyzeTrajectoryImage(this)">
-        <button type="button" id="flipOrderBtn" onclick="flipDotOrder()" style="display:none;padding:2px 9px;border-radius:6px;border:1px solid rgba(139,92,255,.5);background:transparent;color:#8B5CFF;font-size:.7rem;cursor:pointer">🔄 翻转顺序</button>
+        <input type="file" id="imgUploadInput" accept="image/*" style="display:none" onchange="loadTrajectoryImage(this)">
+        <button type="button" id="undoMarkBtn" onclick="undoMark()" style="display:none;padding:2px 9px;border-radius:6px;border:1px solid rgba(255,71,87,.4);background:transparent;color:#FF4757;font-size:.7rem;cursor:pointer">↩ 撤销</button>
+        <button type="button" id="clearMarkBtn" onclick="clearMarks()" style="display:none;padding:2px 9px;border-radius:6px;border:1px solid rgba(255,71,87,.4);background:transparent;color:#FF4757;font-size:.7rem;cursor:pointer">🗑 清除</button>
         <span id="imgScaleGroup" style="display:none;align-items:center;gap:4px;font-size:.7rem;color:var(--sub)">
           缩放<input type="number" id="imgScaleInput" value="1.0" step="0.1" min="0.1" max="10" style="width:46px;padding:1px 4px;border-radius:4px;border:1px solid var(--border);background:#111;color:#fff;font-size:.7rem">×
-          <button type="button" onclick="applyDetectedParams()" style="padding:2px 9px;border-radius:6px;border:1px solid rgba(0,208,132,.5);background:rgba(0,208,132,.12);color:#00D084;font-size:.7rem;cursor:pointer">⚡ 应用参数</button>
+          <button type="button" onclick="applyMarkedParams()" style="padding:2px 9px;border-radius:6px;border:1px solid rgba(0,208,132,.5);background:rgba(0,208,132,.12);color:#00D084;font-size:.7rem;cursor:pointer">⚡ 计算参数</button>
         </span>
         <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:.7rem;color:var(--sub)">
@@ -1297,119 +1298,89 @@ function showCustomForm(editId) {
     modal.addEventListener('input', updateTrajectoryPreview);
     modal._trajBound = true;
   }
-  // 重置图片识别状态
-  _detectedDots = [];
-  const flipBtn = document.getElementById('flipOrderBtn');
-  const scaleGrp = document.getElementById('imgScaleGroup');
-  if (flipBtn) flipBtn.style.display = 'none';
-  if (scaleGrp) scaleGrp.style.display = 'none';
+  // 重置标记状态
+  _exitMarkMode();
   document.getElementById('canvasModeLbl').textContent = '🎯 补偿弹道预览';
   setTimeout(updateTrajectoryPreview, 50);
 }
 
-// ========== 弹道图识别 ==========
-let _detectedDots = [];
+// ========== 弹道图标记（点击式） ==========
+let _bgImage = null;
+let _markPts = [];
+let _markHandler = null;
 
-function analyzeTrajectoryImage(input) {
+function loadTrajectoryImage(input) {
   const file = input.files[0];
   if (!file) return;
   input.value = '';
   const url = URL.createObjectURL(file);
   const img = new Image();
   img.onload = () => {
-    const oc = document.createElement('canvas');
-    oc.width = img.width; oc.height = img.height;
-    const ox = oc.getContext('2d');
-    ox.drawImage(img, 0, 0);
-    const imgData = ox.getImageData(0, 0, img.width, img.height);
+    _bgImage = img;
+    _markPts = [];
     URL.revokeObjectURL(url);
-
-    const radius = Math.max(5, Math.round(Math.max(img.width, img.height) / 80));
-    const green = _findGreenPixels(imgData.data, img.width, img.height);
-    const clusters = _clusterPixels(green, radius);
-
-    if (clusters.length < 2) {
-      showToast('❌ 未检测到绿色弹道点，请确认图片含绿色圆点');
-      return;
-    }
-
-    // 从Y最大（最低，最接近准星位置）的点开始，近邻排序
-    _detectedDots = _orderFromBottom(clusters);
-
-    _showDetectedCanvas();
-    document.getElementById('flipOrderBtn').style.display = 'inline-block';
-    const sg = document.getElementById('imgScaleGroup');
-    sg.style.display = 'inline-flex';
-    document.getElementById('imgScaleInput').value = '1.0';
-    document.getElementById('canvasModeLbl').textContent =
-      `🔍 识别到 ${_detectedDots.length} 个弹道点（第1发在最下方）`;
-    showToast(`✅ 识别到 ${_detectedDots.length} 个弹道点，检查编号顺序，再点"应用参数"`);
+    _enterMarkMode();
+    showToast('图片已加载，按射击顺序依次点击每个绿色弹道点');
   };
   img.onerror = () => { showToast('❌ 图片读取失败'); URL.revokeObjectURL(url); };
   img.src = url;
 }
 
-function _findGreenPixels(data, w, h) {
-  const pts = [];
-  for (let i = 0; i < data.length; i += 4) {
-    const r = data[i], g = data[i+1], b = data[i+2], a = data[i+3];
-    if (a < 80) continue;
-    if (g > 100 && g > r * 1.5 && g > b * 1.5) {
-      pts.push({ x: (i >> 2) % w, y: Math.floor((i >> 2) / w) });
-    }
-  }
-  return pts;
-}
-
-function _clusterPixels(pts, radius) {
-  if (!pts.length) return [];
-  const r2 = (radius * 2) * (radius * 2);
-  const used = new Uint8Array(pts.length);
-  const out = [];
-  for (let i = 0; i < pts.length; i++) {
-    if (used[i]) continue;
-    let sx = pts[i].x, sy = pts[i].y, n = 1;
-    used[i] = 1;
-    for (let j = i + 1; j < pts.length; j++) {
-      if (used[j]) continue;
-      const dx = pts[j].x - pts[i].x, dy = pts[j].y - pts[i].y;
-      if (dx * dx + dy * dy < r2) { sx += pts[j].x; sy += pts[j].y; n++; used[j] = 1; }
-    }
-    if (n >= 3) out.push({ x: sx / n, y: sy / n, size: n });
-  }
-  return out;
-}
-
-function _orderFromBottom(dots) {
-  // 最下方点（Y最大）为第1发，之后近邻遍历
-  let si = 0;
-  for (let i = 1; i < dots.length; i++) if (dots[i].y > dots[si].y) si = i;
-  const rem = dots.slice();
-  const first = rem.splice(si, 1)[0];
-  const ord = [first];
-  while (rem.length) {
-    const last = ord[ord.length - 1];
-    let ni = 0, nd = Infinity;
-    rem.forEach((d, i) => {
-      const d2 = (d.x - last.x) ** 2 + (d.y - last.y) ** 2;
-      if (d2 < nd) { nd = d2; ni = i; }
-    });
-    ord.push(rem.splice(ni, 1)[0]);
-  }
-  return ord;
-}
-
-function flipDotOrder() {
-  if (!_detectedDots.length) return;
-  _detectedDots = _detectedDots.slice().reverse();
-  _showDetectedCanvas();
-  document.getElementById('canvasModeLbl').textContent =
-    `🔍 ${_detectedDots.length} 个弹道点（顺序已翻转）`;
-}
-
-function _showDetectedCanvas() {
+function _enterMarkMode() {
   const canvas = document.getElementById('trajectoryCanvas');
-  if (!canvas || !_detectedDots.length) return;
+  if (!canvas) return;
+  _exitMarkMode();
+  _markHandler = e => {
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    const sx = (canvas.width / dpr) / rect.width;
+    const sy = (canvas.height / dpr) / rect.height;
+    _markPts.push({ x: (e.clientX - rect.left) * sx, y: (e.clientY - rect.top) * sy });
+    _redrawMarkCanvas();
+    document.getElementById('canvasModeLbl').textContent =
+      `🖱 已标记 ${_markPts.length} 发 — 继续点击或点"计算参数"`;
+  };
+  canvas.addEventListener('click', _markHandler);
+  canvas.style.cursor = 'crosshair';
+  document.getElementById('undoMarkBtn').style.display = 'inline-block';
+  document.getElementById('clearMarkBtn').style.display = 'inline-block';
+  document.getElementById('imgScaleGroup').style.display = 'inline-flex';
+  document.getElementById('imgScaleInput').value = '1.0';
+  document.getElementById('canvasModeLbl').textContent = '🖱 按射击顺序点击每个弹道点（第1发→最后1发）';
+  _redrawMarkCanvas();
+}
+
+function _exitMarkMode() {
+  const canvas = document.getElementById('trajectoryCanvas');
+  if (canvas && _markHandler) { canvas.removeEventListener('click', _markHandler); canvas.style.cursor = 'default'; }
+  _markHandler = null;
+  _bgImage = null;
+  _markPts = [];
+  const ub = document.getElementById('undoMarkBtn');
+  const cb = document.getElementById('clearMarkBtn');
+  const sg = document.getElementById('imgScaleGroup');
+  if (ub) ub.style.display = 'none';
+  if (cb) cb.style.display = 'none';
+  if (sg) sg.style.display = 'none';
+}
+
+function undoMark() {
+  if (!_markPts.length) return;
+  _markPts.pop();
+  _redrawMarkCanvas();
+  document.getElementById('canvasModeLbl').textContent =
+    _markPts.length ? `🖱 已标记 ${_markPts.length} 发 — 继续点击` : '🖱 按射击顺序点击每个弹道点';
+}
+
+function clearMarks() {
+  _markPts = [];
+  _redrawMarkCanvas();
+  document.getElementById('canvasModeLbl').textContent = '🖱 按射击顺序点击每个弹道点（第1发→最后1发）';
+}
+
+function _redrawMarkCanvas() {
+  const canvas = document.getElementById('trajectoryCanvas');
+  if (!canvas) return;
   const dpr = window.devicePixelRatio || 1;
   const cssW = canvas.clientWidth || 600, cssH = 190;
   canvas.width = cssW * dpr; canvas.height = cssH * dpr;
@@ -1419,88 +1390,84 @@ function _showDetectedCanvas() {
 
   ctx.fillStyle = '#080a14'; ctx.fillRect(0, 0, W, H);
 
-  const dots = _detectedDots;
+  if (_bgImage) {
+    const ir = _bgImage.width / _bgImage.height;
+    const cr = W / H;
+    let dw, dh, dx, dy;
+    if (ir > cr) { dw = W; dh = W / ir; dx = 0; dy = (H - dh) / 2; }
+    else          { dh = H; dw = H * ir; dy = 0; dx = (W - dw) / 2; }
+    ctx.globalAlpha = 0.65;
+    ctx.drawImage(_bgImage, dx, dy, dw, dh);
+    ctx.globalAlpha = 1;
+  } else {
+    ctx.fillStyle = 'rgba(255,255,255,.18)'; ctx.font = '11px system-ui'; ctx.textAlign = 'center';
+    ctx.fillText('上传弹道图后，按射击顺序点击每个绿色圆点', W/2, H/2);
+    ctx.textAlign = 'left';
+  }
+
+  if (!_markPts.length) return;
+
   const p1t = parseInt(document.getElementById('p1_time')?.value) || 8;
   const p2t = parseInt(document.getElementById('p2_time')?.value) || 20;
+  const COLORS = ['#00C2FF','#8B5CFF','#FF4757'];
 
-  const minX = Math.min(...dots.map(d => d.x));
-  const maxX = Math.max(...dots.map(d => d.x));
-  const minY = Math.min(...dots.map(d => d.y));
-  const maxY = Math.max(...dots.map(d => d.y));
-  const mg = 24;
-  const sx = (W - mg * 2) / Math.max(maxX - minX, 1);
-  const sy = (H - mg * 2) / Math.max(maxY - minY, 1);
-  const s = Math.min(sx, sy, 30);
-  const offX = mg + (W - mg * 2 - (maxX - minX) * s) / 2;
-  const offY = mg + (H - mg * 2 - (maxY - minY) * s) / 2;
-  const toC = d => ({ x: offX + (d.x - minX) * s, y: offY + (d.y - minY) * s });
-
-  // 网格
-  ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 1; ctx.setLineDash([3,5]);
-  for (let gx = mg; gx < W; gx += (W-mg*2)/4) { ctx.beginPath(); ctx.moveTo(gx,0); ctx.lineTo(gx,H); ctx.stroke(); }
-  for (let gy = mg; gy < H; gy += (H-mg*2)/3) { ctx.beginPath(); ctx.moveTo(0,gy); ctx.lineTo(W,gy); ctx.stroke(); }
-  ctx.setLineDash([]);
-
-  // 连线
-  ctx.strokeStyle = 'rgba(255,255,255,0.13)'; ctx.lineWidth = 1.5;
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 1.5;
   ctx.beginPath();
-  dots.forEach((d, i) => { const p = toC(d); i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y); });
+  _markPts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
   ctx.stroke();
 
-  // 点 + 序号
-  const COLORS = ['#00C2FF','#8B5CFF','#FF4757'];
-  dots.forEach((d, i) => {
-    const p = toC(d);
+  _markPts.forEach((p, i) => {
     const col = COLORS[i < p1t ? 0 : i < p2t ? 1 : 2];
-    ctx.fillStyle = col;
-    ctx.beginPath(); ctx.arc(p.x, p.y, 4.5, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#fff'; ctx.font = '8px monospace'; ctx.textAlign = 'center';
-    ctx.fillText(i + 1, p.x, p.y - 7);
+    ctx.fillStyle = col; ctx.globalAlpha = 0.9;
+    ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(p.x, p.y, 5.5, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
+    ctx.fillText(i + 1, p.x, p.y - 9);
     ctx.textAlign = 'left';
   });
 
-  // 说明
-  ctx.fillStyle = 'rgba(255,255,255,.3)'; ctx.font = '10px system-ui';
-  ctx.fillText(`共 ${dots.length} 发  阶段1: 1-${p1t}  阶段2: ${p1t+1}-${p2t}  阶段3: ${p2t+1}-${dots.length}`, mg, H - 8);
+  ctx.fillStyle = 'rgba(255,255,255,.4)'; ctx.font = '10px system-ui';
+  ctx.fillText(
+    `已标记 ${_markPts.length} 发  阶段1:1-${p1t}(蓝)  阶段2:${p1t+1}-${p2t}(紫)  阶段3:${p2t+1}+(红)`,
+    8, H - 7
+  );
 }
 
-function applyDetectedParams() {
-  if (!_detectedDots.length) { showToast('❌ 请先上传弹道图'); return; }
+function applyMarkedParams() {
+  if (_markPts.length < 2) { showToast('❌ 至少标记2个点'); return; }
   const scale = parseFloat(document.getElementById('imgScaleInput')?.value) || 1.0;
   const p1t = parseInt(document.getElementById('p1_time')?.value) || 8;
   const p2t = parseInt(document.getElementById('p2_time')?.value) || 20;
   const yFlip = document.getElementById('yFlipCheck')?.checked ? -1 : 1;
 
-  const dots = _detectedDots;
-  // 每发位移 = 后坐力方向（弹道向上时 dy < 0，因为屏幕 Y 向下）
-  const deltas = dots.slice(1).map((d, i) => ({ dx: d.x - dots[i].x, dy: d.y - dots[i].y }));
+  const pts = _markPts;
+  const deltas = pts.slice(1).map((p, i) => ({ dx: p.x - pts[i].x, dy: p.y - pts[i].y }));
 
   const d1 = deltas.slice(0, p1t - 1);
   const d2 = deltas.slice(p1t - 1, p2t - 1);
   const d3 = deltas.slice(p2t - 1);
   const avg = (arr, k) => arr.length ? arr.reduce((s, d) => s + d[k], 0) / arr.length : 0;
 
-  // 归一化：让最大相位平均Y幅度 = 8（合理的设备单位起点）
   const raw = [
-    { x: avg(d1, 'dx'), y: avg(d1, 'dy') },
-    { x: avg(d2.length ? d2 : d1, 'dx'), y: avg(d2.length ? d2 : d1, 'dy') },
-    { x: avg(d3.length ? d3 : d1, 'dx'), y: avg(d3.length ? d3 : d1, 'dy') }
+    { x: avg(d1,              'dx'), y: avg(d1,              'dy') },
+    { x: avg(d2.length?d2:d1, 'dx'), y: avg(d2.length?d2:d1, 'dy') },
+    { x: avg(d3.length?d3:d1, 'dx'), y: avg(d3.length?d3:d1, 'dy') }
   ];
   const maxAbsY = Math.max(...raw.map(r => Math.abs(r.y)), 0.001);
   const norm = (8 / maxAbsY) * scale;
-
   const clamp = v => Math.max(-128, Math.min(127, Math.round(v)));
+
   ['p1','p2','p3'].forEach((pfx, i) => {
     document.getElementById(pfx + '_x_main').value = clamp(-raw[i].x * norm);
     document.getElementById(pfx + '_y_main').value = clamp(-raw[i].y * norm * yFlip);
   });
 
-  // 隐藏识别面板，显示补偿预览
-  document.getElementById('flipOrderBtn').style.display = 'none';
-  document.getElementById('imgScaleGroup').style.display = 'none';
+  const n = pts.length;
+  _exitMarkMode();
   document.getElementById('canvasModeLbl').textContent = '🎯 补偿弹道预览';
   updateTrajectoryPreview();
-  showToast(`✅ 参数已写入（缩放${scale}×），确认预览弹道后保存`);
+  showToast(`✅ 已根据 ${n} 个标记点计算参数（缩放${scale}×），检查预览后保存`);
 }
 
 // ========== 实时弹道预览 ==========
