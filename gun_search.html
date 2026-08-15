@@ -448,8 +448,8 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;
     <div class="phase-card">
       <div class="phase-title">📌 阶段1 <span style="font-size:.72rem;font-weight:400;color:var(--sub)">（前段，射击初始几发）</span></div>
       <div class="phase-grid">
-        <div class="phase-field"><label>弹数(time)</label><input type="number" id="p1_time" value="5" min="0" max="65535"></div>
-        <div class="phase-field"><label>最大弹数(time_max)</label><input type="number" id="p1_time_max" value="8" min="0" max="65535"></div>
+        <div class="phase-field"><label>弹数(time)</label><input type="number" id="p1_time" value="8" min="0" max="65535"></div>
+        <div class="phase-field"><label>最大弹数(time_max)</label><input type="number" id="p1_time_max" value="10" min="0" max="65535"></div>
         <div class="phase-field"><label>最小延迟(delay_min)</label><input type="number" id="p1_delay_min" value="10" min="0" max="255"></div>
         <div class="phase-field"><label>最大延迟(delay_max)</label><input type="number" id="p1_delay_max" value="15" min="0" max="255"></div>
         <div class="phase-field"><label>X主偏移(x_main)</label><input type="number" id="p1_x_main" value="0" min="-128" max="127"></div>
@@ -463,8 +463,8 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;
     <div class="phase-card">
       <div class="phase-title">📌 阶段2 <span style="font-size:.72rem;font-weight:400;color:var(--sub)">（中段，连续射击中期）</span></div>
       <div class="phase-grid">
-        <div class="phase-field"><label>弹数(time)</label><input type="number" id="p2_time" value="15" min="0" max="65535"></div>
-        <div class="phase-field"><label>最大弹数(time_max)</label><input type="number" id="p2_time_max" value="20" min="0" max="65535"></div>
+        <div class="phase-field"><label>弹数(time)</label><input type="number" id="p2_time" value="20" min="0" max="65535"></div>
+        <div class="phase-field"><label>最大弹数(time_max)</label><input type="number" id="p2_time_max" value="22" min="0" max="65535"></div>
         <div class="phase-field"><label>最小延迟(delay_min)</label><input type="number" id="p2_delay_min" value="10" min="0" max="255"></div>
         <div class="phase-field"><label>最大延迟(delay_max)</label><input type="number" id="p2_delay_max" value="15" min="0" max="255"></div>
         <div class="phase-field"><label>X主偏移(x_main)</label><input type="number" id="p2_x_main" value="0" min="-128" max="127"></div>
@@ -479,7 +479,7 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;
       <div class="phase-title">📌 阶段3 <span style="font-size:.72rem;font-weight:400;color:var(--sub)">（后段，后期弹药）</span></div>
       <div class="phase-grid">
         <div class="phase-field"><label>弹数(time)</label><input type="number" id="p3_time" value="30" min="0" max="65535"></div>
-        <div class="phase-field"><label>最大弹数(time_max)</label><input type="number" id="p3_time_max" value="40" min="0" max="65535"></div>
+        <div class="phase-field"><label>最大弹数(time_max)</label><input type="number" id="p3_time_max" value="30" min="0" max="65535"></div>
         <div class="phase-field"><label>最小延迟(delay_min)</label><input type="number" id="p3_delay_min" value="10" min="0" max="255"></div>
         <div class="phase-field"><label>最大延迟(delay_max)</label><input type="number" id="p3_delay_max" value="15" min="0" max="255"></div>
         <div class="phase-field"><label>X主偏移(x_main)</label><input type="number" id="p3_x_main" value="0" min="-128" max="127"></div>
@@ -1244,11 +1244,11 @@ function renderCustomList() {
 // ========== 预设参数 ==========
 const PRESETS = {
   scurve: {
-    name: 'S形弹道参考',
-    desc: '适合初段偏右→中段偏左→后段偏右的S形后坐力',
-    phase1: { time:8,  time_max:10, delay_min:8, delay_max:12, x_main:-1, y_main:8,  x_alt:0, y_alt:0, interval:16 },
-    phase2: { time:18, time_max:22, delay_min:8, delay_max:12, x_main:3,  y_main:6,  x_alt:0, y_alt:0, interval:16 },
-    phase3: { time:35, time_max:45, delay_min:8, delay_max:12, x_main:-1, y_main:5,  x_alt:0, y_alt:0, interval:16 }
+    name: 'S形弹道参考（30发）',
+    desc: '30发弹匣：初段偏右→中段偏左→后段偏右的S形后坐力',
+    phase1: { time:8,  time_max:10, delay_min:8, delay_max:12, x_main:-1, y_main:8, x_alt:0, y_alt:0, interval:16 },
+    phase2: { time:20, time_max:22, delay_min:8, delay_max:12, x_main:3,  y_main:6, x_alt:0, y_alt:0, interval:16 },
+    phase3: { time:30, time_max:30, delay_min:8, delay_max:12, x_main:-1, y_main:5, x_alt:0, y_alt:0, interval:16 }
   }
 };
 
@@ -1384,7 +1384,7 @@ function _drawRecoilCanvas() {
 
   // 阶段分界（基于当前 time 设置）
   const p1t = (parseInt(document.getElementById('p1_time')?.value) || 8);
-  const p2t = (parseInt(document.getElementById('p2_time')?.value) || 18);
+  const p2t = (parseInt(document.getElementById('p2_time')?.value) || 20);
   const COLORS = ['#00C2FF','#8B5CFF','#FF4757'];
 
   // 连线
