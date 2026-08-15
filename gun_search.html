@@ -430,13 +430,14 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;
     <div style="background:#080a14;border:1.5px solid var(--border);border-radius:10px;margin-bottom:12px;overflow:hidden">
       <div style="padding:7px 12px;border-bottom:1px solid var(--border);font-size:.75rem;color:var(--sub);display:flex;align-items:center;gap:6px;flex-wrap:wrap">
         <span id="canvasModeLbl">🎯 补偿弹道预览</span>
-        <button type="button" onclick="document.getElementById('imgUploadInput').click()" style="padding:2px 9px;border-radius:6px;border:1px solid rgba(0,194,255,.5);background:transparent;color:#00C2FF;font-size:.7rem;cursor:pointer">📷 上传弹道图</button>
-        <input type="file" id="imgUploadInput" accept="image/*" style="display:none" onchange="loadTrajectoryImage(this)">
-        <button type="button" id="undoMarkBtn" onclick="undoMark()" style="display:none;padding:2px 9px;border-radius:6px;border:1px solid rgba(255,71,87,.4);background:transparent;color:#FF4757;font-size:.7rem;cursor:pointer">↩ 撤销</button>
-        <button type="button" id="clearMarkBtn" onclick="clearMarks()" style="display:none;padding:2px 9px;border-radius:6px;border:1px solid rgba(255,71,87,.4);background:transparent;color:#FF4757;font-size:.7rem;cursor:pointer">🗑 清除</button>
+        <button type="button" onclick="document.getElementById('imgUploadInput').click()" style="padding:2px 9px;border-radius:6px;border:1px solid rgba(0,194,255,.5);background:transparent;color:#00C2FF;font-size:.7rem;cursor:pointer">📷 参考图</button>
+        <input type="file" id="imgUploadInput" accept="image/*" style="display:none" onchange="loadBgImage(this)">
+        <button type="button" id="enterDrawBtn" onclick="enterDrawMode()" style="padding:2px 9px;border-radius:6px;border:1px solid rgba(139,92,255,.5);background:transparent;color:#8B5CFF;font-size:.7rem;cursor:pointer">✏️ 描绘弹道</button>
+        <button type="button" id="clearMarkBtn" onclick="clearDrawing()" style="display:none;padding:2px 9px;border-radius:6px;border:1px solid rgba(255,71,87,.4);background:transparent;color:#FF4757;font-size:.7rem;cursor:pointer">🗑 清除</button>
         <span id="imgScaleGroup" style="display:none;align-items:center;gap:4px;font-size:.7rem;color:var(--sub)">
           缩放<input type="number" id="imgScaleInput" value="1.0" step="0.1" min="0.1" max="10" style="width:46px;padding:1px 4px;border-radius:4px;border:1px solid var(--border);background:#111;color:#fff;font-size:.7rem">×
           <button type="button" onclick="applyMarkedParams()" style="padding:2px 9px;border-radius:6px;border:1px solid rgba(0,208,132,.5);background:rgba(0,208,132,.12);color:#00D084;font-size:.7rem;cursor:pointer">⚡ 计算参数</button>
+          <button type="button" onclick="exitDrawMode()" style="padding:2px 9px;border-radius:6px;border:1px solid rgba(255,255,255,.2);background:transparent;color:var(--sub);font-size:.7rem;cursor:pointer">✕ 退出</button>
         </span>
         <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:.7rem;color:var(--sub)">
@@ -1298,18 +1299,20 @@ function showCustomForm(editId) {
     modal.addEventListener('input', updateTrajectoryPreview);
     modal._trajBound = true;
   }
-  // 重置标记状态
-  _exitMarkMode();
+  // 退出描绘模式，恢复预览
+  exitDrawMode();
   document.getElementById('canvasModeLbl').textContent = '🎯 补偿弹道预览';
   setTimeout(updateTrajectoryPreview, 50);
 }
 
-// ========== 弹道图标记（点击式） ==========
+// ========== 弹道描绘（拖拽录制）==========
 let _bgImage = null;
 let _markPts = [];
-let _markHandler = null;
+let _isRecording = false;
+let _drawModeOn = false;
+let _dh = {}; // drag event handler refs
 
-function loadTrajectoryImage(input) {
+function loadBgImage(input) {
   const file = input.files[0];
   if (!file) return;
   input.value = '';
@@ -1317,157 +1320,205 @@ function loadTrajectoryImage(input) {
   const img = new Image();
   img.onload = () => {
     _bgImage = img;
-    _markPts = [];
     URL.revokeObjectURL(url);
-    _enterMarkMode();
-    showToast('图片已加载，按射击顺序依次点击每个绿色弹道点');
+    if (!_drawModeOn) enterDrawMode();
+    else _renderDraw();
+    showToast('参考图已加载，在画布上按住左键拖动描绘弹道');
   };
   img.onerror = () => { showToast('❌ 图片读取失败'); URL.revokeObjectURL(url); };
   img.src = url;
 }
 
-function _enterMarkMode() {
-  const canvas = document.getElementById('trajectoryCanvas');
-  if (!canvas) return;
-  _exitMarkMode();
-  _markHandler = e => {
-    const rect = canvas.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
-    const sx = (canvas.width / dpr) / rect.width;
-    const sy = (canvas.height / dpr) / rect.height;
-    _markPts.push({ x: (e.clientX - rect.left) * sx, y: (e.clientY - rect.top) * sy });
-    _redrawMarkCanvas();
-    document.getElementById('canvasModeLbl').textContent =
-      `🖱 已标记 ${_markPts.length} 发 — 继续点击或点"计算参数"`;
+function enterDrawMode() {
+  const cv = document.getElementById('trajectoryCanvas');
+  if (!cv) return;
+  _cleanupDraw(true); // remove old listeners, keep bgImage/pts
+  _drawModeOn = true;
+
+  const gp = e => {
+    const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    return { x: (e.clientX-r.left)*(cv.width/dpr/r.width), y: (e.clientY-r.top)*(cv.height/dpr/r.height) };
   };
-  canvas.addEventListener('click', _markHandler);
-  canvas.style.cursor = 'crosshair';
-  document.getElementById('undoMarkBtn').style.display = 'inline-block';
+
+  _dh.down = e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    _isRecording = true;
+    _markPts = [gp(e)];
+    document.getElementById('imgScaleGroup').style.display = 'none';
+    _setLbl('⏺ 录制中...（松开鼠标完成）');
+    _renderDraw();
+  };
+  _dh.move = e => {
+    if (!_isRecording) return;
+    const p = gp(e), last = _markPts[_markPts.length-1];
+    if ((p.x-last.x)**2+(p.y-last.y)**2 > 9) { _markPts.push(p); _renderDraw(); }
+  };
+  const finish = () => {
+    if (!_isRecording) return;
+    _isRecording = false;
+    if (_markPts.length > 5) {
+      document.getElementById('imgScaleGroup').style.display = 'inline-flex';
+      _setLbl(`✅ 录制了 ${_markPts.length} 个轨迹点 — 调整缩放后点"计算参数"，或重新拖动覆盖`);
+    } else {
+      _markPts = [];
+      _setLbl('✏️ 轨迹太短，按住左键重新描绘');
+    }
+    _renderDraw();
+  };
+  _dh.up = finish;
+  _dh.leave = finish;
+
+  cv.addEventListener('mousedown', _dh.down);
+  cv.addEventListener('mousemove', _dh.move);
+  cv.addEventListener('mouseup',   _dh.up);
+  cv.addEventListener('mouseleave',_dh.leave);
+  cv.style.cursor = 'crosshair';
+
   document.getElementById('clearMarkBtn').style.display = 'inline-block';
-  document.getElementById('imgScaleGroup').style.display = 'inline-flex';
-  document.getElementById('imgScaleInput').value = '1.0';
-  document.getElementById('canvasModeLbl').textContent = '🖱 按射击顺序点击每个弹道点（第1发→最后1发）';
-  _redrawMarkCanvas();
+  document.getElementById('imgScaleGroup').style.display = 'none';
+  _setLbl('✏️ 按住鼠标左键拖动描绘弹道（从第1发方向拖到最后1发）');
+  _renderDraw();
 }
 
-function _exitMarkMode() {
-  const canvas = document.getElementById('trajectoryCanvas');
-  if (canvas && _markHandler) { canvas.removeEventListener('click', _markHandler); canvas.style.cursor = 'default'; }
-  _markHandler = null;
-  _bgImage = null;
-  _markPts = [];
-  const ub = document.getElementById('undoMarkBtn');
+function _cleanupDraw(keepData) {
+  const cv = document.getElementById('trajectoryCanvas');
+  if (cv) {
+    if (_dh.down)  cv.removeEventListener('mousedown',  _dh.down);
+    if (_dh.move)  cv.removeEventListener('mousemove',  _dh.move);
+    if (_dh.up)    cv.removeEventListener('mouseup',    _dh.up);
+    if (_dh.leave) cv.removeEventListener('mouseleave', _dh.leave);
+    cv.style.cursor = 'default';
+  }
+  _dh = {};
+  _isRecording = false;
+  if (!keepData) { _bgImage = null; _markPts = []; }
+}
+
+function exitDrawMode() {
+  _drawModeOn = false;
+  _cleanupDraw(false);
   const cb = document.getElementById('clearMarkBtn');
   const sg = document.getElementById('imgScaleGroup');
-  if (ub) ub.style.display = 'none';
   if (cb) cb.style.display = 'none';
   if (sg) sg.style.display = 'none';
 }
 
-function undoMark() {
-  if (!_markPts.length) return;
-  _markPts.pop();
-  _redrawMarkCanvas();
-  document.getElementById('canvasModeLbl').textContent =
-    _markPts.length ? `🖱 已标记 ${_markPts.length} 发 — 继续点击` : '🖱 按射击顺序点击每个弹道点';
-}
-
-function clearMarks() {
+function clearDrawing() {
   _markPts = [];
-  _redrawMarkCanvas();
-  document.getElementById('canvasModeLbl').textContent = '🖱 按射击顺序点击每个弹道点（第1发→最后1发）';
+  document.getElementById('imgScaleGroup').style.display = 'none';
+  _setLbl('✏️ 按住鼠标左键拖动描绘弹道');
+  _renderDraw();
 }
 
-function _redrawMarkCanvas() {
-  const canvas = document.getElementById('trajectoryCanvas');
-  if (!canvas) return;
-  const dpr = window.devicePixelRatio || 1;
-  const cssW = canvas.clientWidth || 600, cssH = 190;
-  canvas.width = cssW * dpr; canvas.height = cssH * dpr;
-  const ctx = canvas.getContext('2d');
-  ctx.scale(dpr, dpr);
-  const W = cssW, H = cssH;
+function _setLbl(txt) {
+  const el = document.getElementById('canvasModeLbl');
+  if (el) el.textContent = txt;
+}
 
+function _renderDraw() {
+  const cv = document.getElementById('trajectoryCanvas');
+  if (!cv) return;
+  const dpr = window.devicePixelRatio || 1;
+  const W = cv.clientWidth || 600, H = 190;
+  cv.width = W * dpr; cv.height = H * dpr;
+  const ctx = cv.getContext('2d');
+  ctx.scale(dpr, dpr);
   ctx.fillStyle = '#080a14'; ctx.fillRect(0, 0, W, H);
 
+  // 背景参考图
   if (_bgImage) {
     const ir = _bgImage.width / _bgImage.height;
-    const cr = W / H;
     let dw, dh, dx, dy;
-    if (ir > cr) { dw = W; dh = W / ir; dx = 0; dy = (H - dh) / 2; }
-    else          { dh = H; dw = H * ir; dy = 0; dx = (W - dw) / 2; }
-    ctx.globalAlpha = 0.65;
+    if (ir > W / H) { dw=W; dh=W/ir; dx=0; dy=(H-dh)/2; }
+    else             { dh=H; dw=H*ir; dy=0; dx=(W-dw)/2; }
+    ctx.globalAlpha = 0.6;
     ctx.drawImage(_bgImage, dx, dy, dw, dh);
     ctx.globalAlpha = 1;
-  } else {
-    ctx.fillStyle = 'rgba(255,255,255,.18)'; ctx.font = '11px system-ui'; ctx.textAlign = 'center';
-    ctx.fillText('上传弹道图后，按射击顺序点击每个绿色圆点', W/2, H/2);
-    ctx.textAlign = 'left';
   }
 
-  if (!_markPts.length) return;
+  if (!_markPts.length) {
+    if (!_bgImage) {
+      ctx.fillStyle='rgba(255,255,255,.2)'; ctx.font='11px system-ui'; ctx.textAlign='center';
+      ctx.fillText('按住鼠标左键拖动描绘弹道轨迹（可先上传参考图作为背景）', W/2, H/2);
+      ctx.textAlign='left';
+    } else {
+      ctx.fillStyle='rgba(255,255,255,.5)'; ctx.font='11px system-ui'; ctx.textAlign='center';
+      ctx.fillText('▲ 按住左键在参考图上描绘弹道轨迹', W/2, H-16);
+      ctx.textAlign='left';
+    }
+    return;
+  }
 
   const p1t = parseInt(document.getElementById('p1_time')?.value) || 8;
   const p2t = parseInt(document.getElementById('p2_time')?.value) || 20;
+  const p3t = parseInt(document.getElementById('p3_time_max')?.value) || 30;
+  const n = _markPts.length;
   const COLORS = ['#00C2FF','#8B5CFF','#FF4757'];
 
-  ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  _markPts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
-  ctx.stroke();
+  // 分阶段着色连线
+  for (let i = 1; i < n; i++) {
+    const frac = (i-1) / Math.max(n-2, 1);
+    const shotEst = frac * p3t;
+    const col = COLORS[shotEst < p1t ? 0 : shotEst < p2t ? 1 : 2];
+    ctx.strokeStyle = col; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(_markPts[i-1].x, _markPts[i-1].y); ctx.lineTo(_markPts[i].x, _markPts[i].y); ctx.stroke();
+  }
 
-  _markPts.forEach((p, i) => {
-    const col = COLORS[i < p1t ? 0 : i < p2t ? 1 : 2];
-    ctx.fillStyle = col; ctx.globalAlpha = 0.9;
-    ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI * 2); ctx.fill();
-    ctx.globalAlpha = 1; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.arc(p.x, p.y, 5.5, 0, Math.PI * 2); ctx.stroke();
-    ctx.fillStyle = '#fff'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
-    ctx.fillText(i + 1, p.x, p.y - 9);
-    ctx.textAlign = 'left';
-  });
+  // 起点(蓝) / 终点(红)
+  ctx.fillStyle='#00D084'; ctx.beginPath(); ctx.arc(_markPts[0].x, _markPts[0].y, 5, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle='#FF4757'; ctx.beginPath(); ctx.arc(_markPts[n-1].x, _markPts[n-1].y, 5, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.font='9px system-ui'; ctx.textAlign='center';
+  ctx.fillText('起', _markPts[0].x, _markPts[0].y-8);
+  ctx.fillText('终', _markPts[n-1].x, _markPts[n-1].y-8);
+  ctx.textAlign='left';
 
-  ctx.fillStyle = 'rgba(255,255,255,.4)'; ctx.font = '10px system-ui';
-  ctx.fillText(
-    `已标记 ${_markPts.length} 发  阶段1:1-${p1t}(蓝)  阶段2:${p1t+1}-${p2t}(紫)  阶段3:${p2t+1}+(红)`,
-    8, H - 7
-  );
+  ctx.fillStyle='rgba(255,255,255,.35)'; ctx.font='10px system-ui';
+  ctx.fillText(`${n}点  蓝=前${p1t}发  紫=中段  红=后段`, 8, H-7);
 }
 
 function applyMarkedParams() {
-  if (_markPts.length < 2) { showToast('❌ 至少标记2个点'); return; }
-  const scale = parseFloat(document.getElementById('imgScaleInput')?.value) || 1.0;
-  const p1t = parseInt(document.getElementById('p1_time')?.value) || 8;
-  const p2t = parseInt(document.getElementById('p2_time')?.value) || 20;
-  const yFlip = document.getElementById('yFlipCheck')?.checked ? -1 : 1;
+  if (_markPts.length < 5) { showToast('❌ 轨迹太短，请重新描绘'); return; }
+  const scale  = parseFloat(document.getElementById('imgScaleInput')?.value) || 1.0;
+  const p1t    = parseInt(document.getElementById('p1_time')?.value)       || 8;
+  const p2t    = parseInt(document.getElementById('p2_time')?.value)       || 20;
+  const p3t    = parseInt(document.getElementById('p3_time_max')?.value)   || 30;
+  const yFlip  = document.getElementById('yFlipCheck')?.checked ? -1 : 1;
 
-  const pts = _markPts;
-  const deltas = pts.slice(1).map((p, i) => ({ dx: p.x - pts[i].x, dy: p.y - pts[i].y }));
+  const pts = _markPts, n = pts.length;
+  const f1 = p1t / p3t, f2 = p2t / p3t;
 
-  const d1 = deltas.slice(0, p1t - 1);
-  const d2 = deltas.slice(p1t - 1, p2t - 1);
-  const d3 = deltas.slice(p2t - 1);
-  const avg = (arr, k) => arr.length ? arr.reduce((s, d) => s + d[k], 0) / arr.length : 0;
+  const sliceDelta = (fStart, fEnd) => {
+    const s = Math.max(0, Math.floor(fStart*(n-1)));
+    const e = Math.min(n-1, Math.ceil(fEnd*(n-1)));
+    const seg = pts.slice(s, e+1);
+    return seg.slice(1).map((p,i) => ({ dx: p.x-seg[i].x, dy: p.y-seg[i].y }));
+  };
+
+  const d1 = sliceDelta(0, f1);
+  const d2 = sliceDelta(f1, f2);
+  const d3 = sliceDelta(f2, 1);
+  const avg = (arr, k) => arr.length ? arr.reduce((s,d)=>s+d[k],0)/arr.length : 0;
 
   const raw = [
-    { x: avg(d1,              'dx'), y: avg(d1,              'dy') },
-    { x: avg(d2.length?d2:d1, 'dx'), y: avg(d2.length?d2:d1, 'dy') },
-    { x: avg(d3.length?d3:d1, 'dx'), y: avg(d3.length?d3:d1, 'dy') }
+    { x: avg(d1,'dx'), y: avg(d1,'dy') },
+    { x: avg(d2.length?d2:d1,'dx'), y: avg(d2.length?d2:d1,'dy') },
+    { x: avg(d3.length?d3:d1,'dx'), y: avg(d3.length?d3:d1,'dy') }
   ];
-  const maxAbsY = Math.max(...raw.map(r => Math.abs(r.y)), 0.001);
+
+  const maxAbsY = Math.max(...raw.map(r=>Math.abs(r.y)), 0.001);
   const norm = (8 / maxAbsY) * scale;
   const clamp = v => Math.max(-128, Math.min(127, Math.round(v)));
 
   ['p1','p2','p3'].forEach((pfx, i) => {
-    document.getElementById(pfx + '_x_main').value = clamp(-raw[i].x * norm);
-    document.getElementById(pfx + '_y_main').value = clamp(-raw[i].y * norm * yFlip);
+    document.getElementById(pfx+'_x_main').value = clamp(-raw[i].x * norm);
+    document.getElementById(pfx+'_y_main').value = clamp(-raw[i].y * norm * yFlip);
   });
 
-  const n = pts.length;
-  _exitMarkMode();
-  document.getElementById('canvasModeLbl').textContent = '🎯 补偿弹道预览';
+  exitDrawMode();
+  _setLbl('🎯 补偿弹道预览');
   updateTrajectoryPreview();
-  showToast(`✅ 已根据 ${n} 个标记点计算参数（缩放${scale}×），检查预览后保存`);
+  showToast(`✅ 参数已计算（缩放${scale}×），确认预览后保存`);
 }
 
 // ========== 实时弹道预览 ==========
@@ -1478,6 +1529,7 @@ function readPhaseFromFormSafe(prefix) {
 }
 
 function updateTrajectoryPreview() {
+  if (_drawModeOn) { _renderDraw(); return; }
   const canvas = document.getElementById('trajectoryCanvas');
   if (!canvas) return;
 
