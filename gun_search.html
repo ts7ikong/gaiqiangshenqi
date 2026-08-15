@@ -428,14 +428,19 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;
     </div>
     <!-- 实时弹道预览 -->
     <div style="background:#080a14;border:1.5px solid var(--border);border-radius:10px;margin-bottom:12px;overflow:hidden">
-      <div style="padding:7px 12px;border-bottom:1px solid var(--border);font-size:.75rem;color:var(--sub);display:flex;align-items:center;gap:10px">
-        <span>🎯 补偿弹道实时预览</span>
-        <span style="display:flex;gap:10px;margin-left:auto">
+      <div style="padding:7px 12px;border-bottom:1px solid var(--border);font-size:.75rem;color:var(--sub);display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        <span id="canvasModeLbl">🎯 补偿弹道预览</span>
+        <button type="button" id="drawModeBtn" onclick="toggleDrawMode()" style="padding:2px 9px;border-radius:6px;border:1px solid rgba(0,194,255,.5);background:transparent;color:#00C2FF;font-size:.7rem;cursor:pointer">✏️ 手绘弹道</button>
+        <button type="button" id="clearDrawBtn" onclick="clearDraw()" style="display:none;padding:2px 9px;border-radius:6px;border:1px solid rgba(255,71,87,.4);background:transparent;color:#FF4757;font-size:.7rem;cursor:pointer">🗑 清除</button>
+        <button type="button" id="calcDrawBtn" onclick="calculateFromDraw()" style="display:none;padding:2px 9px;border-radius:6px;border:1px solid rgba(0,208,132,.5);background:rgba(0,208,132,.12);color:#00D084;font-size:.7rem;cursor:pointer">⚡ 反向计算参数</button>
+        <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:.7rem;color:var(--sub)">
+            <input type="checkbox" id="yFlipCheck" onchange="updateTrajectoryPreview()" style="width:13px;height:13px;accent-color:var(--accent)"> Y轴翻转
+          </label>
           <span style="color:#00C2FF;font-size:.7rem">● 阶段1</span>
           <span style="color:#8B5CFF;font-size:.7rem">● 阶段2</span>
           <span style="color:#FF4757;font-size:.7rem">● 阶段3</span>
-        </span>
-        <span id="traj-tip" style="font-size:.7rem;color:rgba(255,255,255,.25)">起点 ✦</span>
+        </div>
       </div>
       <canvas id="trajectoryCanvas" style="width:100%;height:190px;display:block"></canvas>
     </div>
@@ -1285,10 +1290,154 @@ function showCustomForm(editId) {
   // 绑定实时预览（只绑一次）
   const modal = document.getElementById('customModal');
   if (!modal._trajBound) {
-    modal.addEventListener('input', () => updateTrajectoryPreview());
+    modal.addEventListener('input', () => { if (!_drawMode) updateTrajectoryPreview(); });
     modal._trajBound = true;
   }
-  setTimeout(updateTrajectoryPreview, 50);
+  // 退出手绘模式
+  _drawMode = false;
+  _recoilPts = [];
+  const drawBtn = document.getElementById('drawModeBtn');
+  if (drawBtn) { drawBtn.textContent = '✏️ 手绘弹道'; drawBtn.style.background = 'transparent'; }
+  const clrBtn = document.getElementById('clearDrawBtn');
+  if (clrBtn) clrBtn.style.display = 'none';
+  const calcBtn2 = document.getElementById('calcDrawBtn');
+  if (calcBtn2) calcBtn2.style.display = 'none';
+  const canvas = document.getElementById('trajectoryCanvas');
+  if (canvas) canvas.style.cursor = 'default';
+  setTimeout(() => { _initDrawListener(); updateTrajectoryPreview(); }, 50);
+}
+
+// ========== 手绘弹道 & 反向计算 ==========
+let _drawMode = false;
+let _recoilPts = []; // 用户在画布上点击的原始坐标（canvas CSS px）
+
+function toggleDrawMode() {
+  _drawMode = !_drawMode;
+  const btn      = document.getElementById('drawModeBtn');
+  const clearBtn = document.getElementById('clearDrawBtn');
+  const calcBtn  = document.getElementById('calcDrawBtn');
+  const lbl      = document.getElementById('canvasModeLbl');
+  const canvas   = document.getElementById('trajectoryCanvas');
+  if (_drawMode) {
+    btn.textContent = '✅ 退出绘制';
+    btn.style.background = 'rgba(0,194,255,.15)';
+    clearBtn.style.display = 'inline-block';
+    canvas.style.cursor = 'crosshair';
+    lbl.textContent = '✏️ 点击标记弹道点（按开枪顺序）';
+    _recoilPts = [];
+    _drawRecoilCanvas();
+  } else {
+    btn.textContent = '✏️ 手绘弹道';
+    btn.style.background = 'transparent';
+    clearBtn.style.display = 'none';
+    calcBtn.style.display = 'none';
+    canvas.style.cursor = 'default';
+    lbl.textContent = '🎯 补偿弹道预览';
+    updateTrajectoryPreview();
+  }
+}
+
+function clearDraw() {
+  _recoilPts = [];
+  document.getElementById('calcDrawBtn').style.display = 'none';
+  _drawRecoilCanvas();
+}
+
+function _initDrawListener() {
+  const canvas = document.getElementById('trajectoryCanvas');
+  if (!canvas || canvas._drawBound) return;
+  canvas._drawBound = true;
+  canvas.addEventListener('click', e => {
+    if (!_drawMode) return;
+    const rect = canvas.getBoundingClientRect();
+    _recoilPts.push({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+    document.getElementById('calcDrawBtn').style.display = _recoilPts.length >= 3 ? 'inline-block' : 'none';
+    _drawRecoilCanvas();
+  });
+}
+
+function _drawRecoilCanvas() {
+  const canvas = document.getElementById('trajectoryCanvas');
+  if (!canvas) return;
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = canvas.clientWidth || 600, cssH = 190;
+  canvas.width = cssW * dpr; canvas.height = cssH * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  const W = cssW, H = cssH;
+
+  ctx.fillStyle = '#080a14'; ctx.fillRect(0, 0, W, H);
+
+  // 网格
+  ctx.strokeStyle = 'rgba(255,255,255,0.06)'; ctx.lineWidth = 1; ctx.setLineDash([3,5]);
+  for (let gx = 0; gx < W; gx += W / 6) { ctx.beginPath(); ctx.moveTo(gx,0); ctx.lineTo(gx,H); ctx.stroke(); }
+  for (let gy = 0; gy < H; gy += H / 4) { ctx.beginPath(); ctx.moveTo(0,gy); ctx.lineTo(W,gy); ctx.stroke(); }
+  ctx.setLineDash([]);
+
+  // 提示
+  if (_recoilPts.length === 0) {
+    ctx.fillStyle = 'rgba(255,255,255,.2)'; ctx.font = '11px system-ui'; ctx.textAlign = 'center';
+    ctx.fillText('点击画布标记弹道落点（第1发→最后1发，模拟你的枪实际弹道）', W/2, H/2);
+    ctx.textAlign = 'left';
+    return;
+  }
+
+  // 阶段分界（基于当前 time 设置）
+  const p1t = (parseInt(document.getElementById('p1_time')?.value) || 8);
+  const p2t = (parseInt(document.getElementById('p2_time')?.value) || 18);
+  const COLORS = ['#00C2FF','#8B5CFF','#FF4757'];
+
+  // 连线
+  ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  _recoilPts.forEach((p, i) => i===0 ? ctx.moveTo(p.x,p.y) : ctx.lineTo(p.x,p.y));
+  ctx.stroke();
+
+  // 点
+  _recoilPts.forEach((p, i) => {
+    const phase = i < p1t ? 0 : i < p2t ? 1 : 2;
+    const col = COLORS[phase];
+    const rgb = [parseInt(col.slice(1,3),16), parseInt(col.slice(3,5),16), parseInt(col.slice(5,7),16)];
+    ctx.fillStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.9)`;
+    ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
+    ctx.fillText(i+1, p.x, p.y - 8);
+    ctx.textAlign = 'left';
+  });
+}
+
+function calculateFromDraw() {
+  if (_recoilPts.length < 2) { showToast('❌ 至少需要标记2个点'); return; }
+
+  const p1t = parseInt(document.getElementById('p1_time')?.value) || 8;
+  const p2t = parseInt(document.getElementById('p2_time')?.value) || 18;
+  const yFlip = document.getElementById('yFlipCheck')?.checked ? -1 : 1;
+
+  // 每发的delta = 本发位置 - 上一发位置（这是弹道移动方向）
+  const deltas = _recoilPts.slice(1).map((p, i) => ({
+    dx: p.x - _recoilPts[i].x,
+    dy: p.y - _recoilPts[i].y
+  }));
+
+  const avg = (arr, key) => arr.length ? arr.reduce((s,d) => s + d[key], 0) / arr.length : 0;
+
+  const d1 = deltas.slice(0, p1t);
+  const d2 = deltas.slice(p1t, p2t);
+  const d3 = deltas.slice(p2t);
+
+  // 补偿 = 弹道偏移的反方向；Y 乘以 yFlip 处理轴方向
+  const fill = (prefix, arr) => {
+    if (!arr.length) return;
+    const xv = -Math.round(avg(arr,'dx'));
+    const yv =  Math.round(-avg(arr,'dy') * yFlip);
+    document.getElementById(prefix+'_x_main').value = Math.max(-128, Math.min(127, xv));
+    document.getElementById(prefix+'_y_main').value = Math.max(-128, Math.min(127, yv));
+  };
+  fill('p1', d1); fill('p2', d2.length ? d2 : d1); fill('p3', d3.length ? d3 : d1);
+
+  showToast('✅ 参数已反向计算，请检查预览后保存');
+  toggleDrawMode(); // 退出绘制模式，显示补偿预览
+  updateTrajectoryPreview();
 }
 
 // ========== 实时弹道预览 ==========
@@ -1323,11 +1472,13 @@ function updateTrajectoryPreview() {
   const shots2 = Math.max(0, p2.time - p1.time);
   const shots3 = Math.max(0, (p3.time_max || 30) - p2.time);
 
+  const ySign = (document.getElementById('yFlipCheck')?.checked) ? -1 : 1;
+
   // 预算总范围，用于自动缩放
   let cx = 0, cy = 0, minX = 0, maxX = 0, minY = 0, maxY = 0;
   const simulate = (phase, n) => {
     for (let i = 0; i < n; i++) {
-      cx += phase.x_main; cy += phase.y_main;
+      cx += phase.x_main; cy += phase.y_main * ySign;
       if (cx < minX) minX = cx; if (cx > maxX) maxX = cx;
       if (cy < minY) minY = cy; if (cy > maxY) maxY = cy;
     }
@@ -1376,7 +1527,7 @@ function updateTrajectoryPreview() {
     const r = parseInt(rgb.slice(0,2),16), g2 = parseInt(rgb.slice(2,4),16), b = parseInt(rgb.slice(4,6),16);
     for (let i = 0; i < shots; i++) {
       px += phase.x_main * scale;
-      py += phase.y_main * scale;
+      py += phase.y_main * ySign * scale;
       const drawX = Math.max(4, Math.min(W - 4, px));
       const drawY = Math.max(4, Math.min(H - 4, py));
       const alpha = 0.5 + 0.5 * (shotIdx / Math.max(totalShots - 1, 1));
