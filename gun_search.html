@@ -1483,7 +1483,7 @@ async function loadRecordedTrajectory() {
   let data;
   try {
     const r = await fetch('/trajectory.json?_=' + Date.now());
-    if (!r.ok) throw new Error('文件不存在，请先运行「录制弹道.bat」');
+    if (!r.ok) throw new Error('文件不存在，请先运行 录制弹道.bat');
     data = await r.json();
   } catch(e) { showToast('❌ ' + e.message); return; }
   if (!Array.isArray(data) || data.length < 5) { showToast('❌ 录制数据不足，请重新录制'); return; }
