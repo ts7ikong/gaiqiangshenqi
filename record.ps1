@@ -63,8 +63,8 @@ while (([DateTime]::Now - $t0).TotalSeconds -lt $duration) {
 
 Write-Host " 录制完成：$($pts.Count) 个数据点" -ForegroundColor Green
 
-# 手动拼接 JSON（兼容性更好）
-$lines = $pts | ForEach-Object { "{`"x`":$($_.x),`"y`":$($_.y),`"t`":$($_.t)}" }
+# 手动拼接 JSON
+$lines = $pts | ForEach-Object { '{"x":' + $_.x + ',"y":' + $_.y + ',"t":' + $_.t + '}' }
 $json = "[" + ($lines -join ",") + "]"
 
 $savePath = Join-Path $PSScriptRoot "trajectory.json"
