@@ -54,9 +54,6 @@ public class RawMouseCapture : Form {
         IntPtr hRawInput, uint uiCommand,
         out RAWINPUT pData, ref uint pcbSize, uint cbSizeHeader);
 
-    [DllImport("user32.dll")]
-    public static extern short GetAsyncKeyState(int vKey);
-
     const int WM_INPUT = 0x00FF;
     const uint RIDEV_INPUTSINK = 0x00000100;
     const uint RID_INPUT = 0x10000003;
@@ -111,11 +108,10 @@ Write-Host " 【重要】游戏必须设置为窗口模式或全屏窗口化" -F
 Write-Host ""
 Write-Host " 流程："
 Write-Host "  1. 训练场瞄准靶子，关闭压枪器"
-Write-Host "  2. 此窗口按 Enter，切换回游戏"
-Write-Host "  3. 按一下 F8 键开始"
-Write-Host "  4. 立刻开枪，打完一梭子（边打边手动压枪）"
-Write-Host "  5. 再按 F8 停止（或8秒后自动停）"
-Write-Host "  6. 回到浏览器点「载入录制」"
+Write-Host "  2. 此窗口按 Enter，立刻切换回游戏"
+Write-Host "  3. 5秒倒计时结束后自动开始录制"
+Write-Host "  4. 立刻开枪，边打边手动压枪（最长8秒）"
+Write-Host "  5. 打完后切回此窗口，回到浏览器点「载入录制」"
 Write-Host ""
 
 $capture = New-Object RawMouseCapture
@@ -128,31 +124,25 @@ if (-not $capture.Register()) {
     exit
 }
 
-Read-Host " 按 Enter 开始等待..."
+Read-Host " 按 Enter 开始倒计时，立刻切换到游戏瞄准..."
 Write-Host ""
-Write-Host " 切换到游戏，按 F8 开始录制" -ForegroundColor Cyan
 
-# 等 F8 松开（防止立即触发）
-while ([RawMouseCapture]::GetAsyncKeyState(0x77) -band 0x8000) {
-    [System.Windows.Forms.Application]::DoEvents()
-    Start-Sleep -Milliseconds 10
+foreach ($i in 5..1) {
+    Write-Host " $i ..." -ForegroundColor Yellow
+    $deadline2 = [DateTime]::Now.AddSeconds(1)
+    while ([DateTime]::Now -lt $deadline2) {
+        [System.Windows.Forms.Application]::DoEvents()
+        Start-Sleep -Milliseconds 20
+    }
 }
 
-# 等 F8 按下
-while (-not ([RawMouseCapture]::GetAsyncKeyState(0x77) -band 0x8000)) {
-    [System.Windows.Forms.Application]::DoEvents()
-    Start-Sleep -Milliseconds 10
-}
-Start-Sleep -Milliseconds 200
-
-Write-Host " 录制开始！打完后再按一次 F8 结束（最长8秒）" -ForegroundColor Green
+Write-Host " 开始！立刻开枪压枪！" -ForegroundColor Green
 
 $capture.Timer.Restart()
 $capture.Recording = $true
 
 $deadline = [DateTime]::Now.AddSeconds(8)
 while ([DateTime]::Now -lt $deadline) {
-    if ([RawMouseCapture]::GetAsyncKeyState(0x77) -band 0x8000) { break }
     [System.Windows.Forms.Application]::DoEvents()
     Start-Sleep -Milliseconds 5
 }
@@ -161,6 +151,7 @@ $capture.Recording = $false
 $deltas = $capture.Deltas
 $capture.Close()
 
+Write-Host ""
 Write-Host " 录制完成：$($deltas.Count) 个原始事件" -ForegroundColor Green
 
 if ($deltas.Count -lt 5) {
