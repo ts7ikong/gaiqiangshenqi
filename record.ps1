@@ -3,7 +3,7 @@
 
 Add-Type -AssemblyName System.Windows.Forms
 
-Add-Type @'
+Add-Type -ReferencedAssemblies 'System.Windows.Forms','System.Drawing' @'
 using System;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
