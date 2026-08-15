@@ -112,9 +112,9 @@ Write-Host ""
 Write-Host " 流程："
 Write-Host "  1. 训练场瞄准靶子，关闭压枪器"
 Write-Host "  2. 此窗口按 Enter，切换回游戏"
-Write-Host "  3. 按一下 Scroll Lock 键（Prt Sc 旁边）开始"
+Write-Host "  3. 按一下 F8 键开始"
 Write-Host "  4. 立刻开枪，打完一梭子（边打边手动压枪）"
-Write-Host "  5. 再按 Scroll Lock 停止（或8秒后自动停）"
+Write-Host "  5. 再按 F8 停止（或8秒后自动停）"
 Write-Host "  6. 回到浏览器点「载入录制」"
 Write-Host ""
 
@@ -130,29 +130,29 @@ if (-not $capture.Register()) {
 
 Read-Host " 按 Enter 开始等待..."
 Write-Host ""
-Write-Host " 切换到游戏，按 Scroll Lock 开始录制" -ForegroundColor Cyan
+Write-Host " 切换到游戏，按 F8 开始录制" -ForegroundColor Cyan
 
-# 等 Scroll Lock 松开（防止立即触发）
-while ([RawMouseCapture]::GetAsyncKeyState(0x91) -band 0x8000) {
+# 等 F8 松开（防止立即触发）
+while ([RawMouseCapture]::GetAsyncKeyState(0x77) -band 0x8000) {
     [System.Windows.Forms.Application]::DoEvents()
     Start-Sleep -Milliseconds 10
 }
 
-# 等 Scroll Lock 按下
-while (-not ([RawMouseCapture]::GetAsyncKeyState(0x91) -band 0x8000)) {
+# 等 F8 按下
+while (-not ([RawMouseCapture]::GetAsyncKeyState(0x77) -band 0x8000)) {
     [System.Windows.Forms.Application]::DoEvents()
     Start-Sleep -Milliseconds 10
 }
 Start-Sleep -Milliseconds 200
 
-Write-Host " 录制开始！打完后再按一次 Scroll Lock 结束（最长8秒）" -ForegroundColor Green
+Write-Host " 录制开始！打完后再按一次 F8 结束（最长8秒）" -ForegroundColor Green
 
 $capture.Timer.Restart()
 $capture.Recording = $true
 
 $deadline = [DateTime]::Now.AddSeconds(8)
 while ([DateTime]::Now -lt $deadline) {
-    if ([RawMouseCapture]::GetAsyncKeyState(0x91) -band 0x8000) { break }
+    if ([RawMouseCapture]::GetAsyncKeyState(0x77) -band 0x8000) { break }
     [System.Windows.Forms.Application]::DoEvents()
     Start-Sleep -Milliseconds 5
 }
