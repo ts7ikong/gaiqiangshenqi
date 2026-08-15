@@ -56,7 +56,7 @@ public static class LLHook {
     public static readonly Stopwatch Timer = new Stopwatch();
     public static readonly List<int[]> Deltas = new List<int[]>();
 
-    static bool   s_left, s_right;
+    static bool   s_right;
     static int    s_lastX = int.MinValue, s_lastY;
     static IntPtr s_hook;
     static LLProc s_proc;   // keep alive
@@ -69,7 +69,6 @@ public static class LLHook {
 
             if (msg == WM_LBUTTONDOWN) {
                 ButtonEvents++;
-                s_left = true;
                 if (s_right && !Recording) {
                     Deltas.Clear();
                     Timer.Restart();
@@ -78,7 +77,6 @@ public static class LLHook {
                 }
             } else if (msg == WM_LBUTTONUP) {
                 ButtonEvents++;
-                s_left = false;
                 if (Recording) { Recording = false; Done = true; }
             } else if (msg == WM_RBUTTONDOWN) {
                 ButtonEvents++;
