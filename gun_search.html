@@ -1505,9 +1505,10 @@ async function loadRecordedTrajectory() {
   if (!_drawModeOn) enterDrawMode();
   _markPts = sampled.map(p => ({ x: p.x * sc + offX, y: p.y * sc + offY }));
   document.getElementById('imgScaleGroup').style.display = 'inline-flex';
-  _setLbl(`✅ 已载入 ${_markPts.length} 个录制轨迹点 — 调整缩放后点"计算参数"`);
   _renderDraw();
-  showToast(`✅ 轨迹载入成功（${data.length}点 → ${sampled.length}点）`);
+  showToast(`✅ 轨迹载入（${data.length}点），正在自动计算参数...`);
+  // 自动计算，无需手动点"计算参数"
+  applyMarkedParams();
 }
 
 function applyMarkedParams() {
