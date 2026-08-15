@@ -422,8 +422,22 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;
       <div class="form-row"><label class="form-label">配置名称 *</label><input id="custom-name" class="form-input" placeholder="例：我的AKM定制"></div>
       <div class="form-row"><label class="form-label">枪名（显示用）</label><input id="custom-gunname" class="form-input" placeholder="AKM突击步枪"></div>
     </div>
-    <div style="font-size:.78rem;color:var(--sub);margin-bottom:10px">
-      📐 X/Y为有符号值（−128~127），正值向右/下，负值向左/上；time为该阶段触发的弹数；delay/interval单位为毫秒
+    <div style="font-size:.78rem;color:var(--sub);margin-bottom:10px;display:flex;align-items:center;flex-wrap:wrap;gap:8px">
+      <span>📐 X/Y为有符号值（−128~127），正值向右/下，负值向左/上；time为该阶段弹数</span>
+      <button type="button" class="cbtn cbtn-id" style="padding:4px 12px;font-size:.75rem;margin-left:auto" onclick="applyPreset('scurve')">🎯 载入S形弹道参考设置</button>
+    </div>
+    <!-- 实时弹道预览 -->
+    <div style="background:#080a14;border:1.5px solid var(--border);border-radius:10px;margin-bottom:12px;overflow:hidden">
+      <div style="padding:7px 12px;border-bottom:1px solid var(--border);font-size:.75rem;color:var(--sub);display:flex;align-items:center;gap:10px">
+        <span>🎯 补偿弹道实时预览</span>
+        <span style="display:flex;gap:10px;margin-left:auto">
+          <span style="color:#00C2FF;font-size:.7rem">● 阶段1</span>
+          <span style="color:#8B5CFF;font-size:.7rem">● 阶段2</span>
+          <span style="color:#FF4757;font-size:.7rem">● 阶段3</span>
+        </span>
+        <span id="traj-tip" style="font-size:.7rem;color:rgba(255,255,255,.25)">起点 ✦</span>
+      </div>
+      <canvas id="trajectoryCanvas" style="width:100%;height:190px;display:block"></canvas>
     </div>
     <!-- 阶段1 -->
     <div class="phase-card">
@@ -1222,6 +1236,30 @@ function renderCustomList() {
   }).join('');
 }
 
+// ========== 预设参数 ==========
+const PRESETS = {
+  scurve: {
+    name: 'S形弹道参考',
+    desc: '适合初段偏右→中段偏左→后段偏右的S形后坐力',
+    phase1: { time:8,  time_max:10, delay_min:8, delay_max:12, x_main:-1, y_main:8,  x_alt:0, y_alt:0, interval:16 },
+    phase2: { time:18, time_max:22, delay_min:8, delay_max:12, x_main:3,  y_main:6,  x_alt:0, y_alt:0, interval:16 },
+    phase3: { time:35, time_max:45, delay_min:8, delay_max:12, x_main:-1, y_main:5,  x_alt:0, y_alt:0, interval:16 }
+  }
+};
+
+function applyPreset(key) {
+  const p = PRESETS[key]; if (!p) return;
+  ['p1','p2','p3'].forEach((prefix, i) => {
+    const ph = p['phase' + (i + 1)];
+    Object.entries(ph).forEach(([k, v]) => {
+      const el = document.getElementById(prefix + '_' + k);
+      if (el) el.value = v;
+    });
+  });
+  updateTrajectoryPreview();
+  showToast('✅ 已载入：' + p.desc);
+}
+
 function showCustomForm(editId) {
   document.getElementById('customModal').classList.add('open');
   const editEl = document.getElementById('custom-edit-id');
@@ -1244,6 +1282,115 @@ function showCustomForm(editId) {
     document.getElementById('custom-name').value = '';
     document.getElementById('custom-gunname').value = '';
   }
+  // 绑定实时预览（只绑一次）
+  const modal = document.getElementById('customModal');
+  if (!modal._trajBound) {
+    modal.addEventListener('input', () => updateTrajectoryPreview());
+    modal._trajBound = true;
+  }
+  setTimeout(updateTrajectoryPreview, 50);
+}
+
+// ========== 实时弹道预览 ==========
+function readPhaseFromFormSafe(prefix) {
+  const g = k => { const el = document.getElementById(prefix + '_' + k); return el ? (parseInt(el.value) || 0) : 0; };
+  return { time:g('time'), time_max:g('time_max'), delay_min:g('delay_min'), delay_max:g('delay_max'),
+           x_main:g('x_main'), y_main:g('y_main'), x_alt:g('x_alt'), y_alt:g('y_alt'), interval:g('interval') };
+}
+
+function updateTrajectoryPreview() {
+  const canvas = document.getElementById('trajectoryCanvas');
+  if (!canvas) return;
+
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = canvas.clientWidth || 600;
+  const cssH = 190;
+  canvas.width  = cssW * dpr;
+  canvas.height = cssH * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const W = cssW, H = cssH;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#080a14';
+  ctx.fillRect(0, 0, W, H);
+
+  const p1 = readPhaseFromFormSafe('p1');
+  const p2 = readPhaseFromFormSafe('p2');
+  const p3 = readPhaseFromFormSafe('p3');
+
+  const shots1 = Math.max(0, p1.time);
+  const shots2 = Math.max(0, p2.time - p1.time);
+  const shots3 = Math.max(0, (p3.time_max || 30) - p2.time);
+
+  // 预算总范围，用于自动缩放
+  let cx = 0, cy = 0, minX = 0, maxX = 0, minY = 0, maxY = 0;
+  const simulate = (phase, n) => {
+    for (let i = 0; i < n; i++) {
+      cx += phase.x_main; cy += phase.y_main;
+      if (cx < minX) minX = cx; if (cx > maxX) maxX = cx;
+      if (cy < minY) minY = cy; if (cy > maxY) maxY = cy;
+    }
+  };
+  simulate(p1, shots1); simulate(p2, shots2); simulate(p3, shots3);
+
+  const rangeX = Math.max(maxX - minX, 1);
+  const rangeY = Math.max(maxY - minY, 1);
+  const margin = 24;
+  const scaleX = (W - margin * 2) / rangeX;
+  const scaleY = (H - margin * 2) / rangeY;
+  const scale  = Math.min(scaleX, scaleY, 18);
+
+  // 起始锚点：让整体轨迹居中
+  const totalShots = shots1 + shots2 + shots3;
+  const anchorX = W / 2 - ((minX + maxX) / 2) * scale;
+  const anchorY = H / 2 - ((minY + maxY) / 2) * scale;
+
+  // 网格线
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([3, 5]);
+  for (let gx = margin; gx < W; gx += (W - margin * 2) / 4) {
+    ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke();
+  }
+  for (let gy = margin; gy < H; gy += (H - margin * 2) / 3) {
+    ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  // 起点
+  ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  ctx.beginPath(); ctx.arc(anchorX, anchorY, 5, 0, Math.PI * 2); ctx.fill();
+
+  const PHASE_COLORS = ['#00C2FF', '#8B5CFF', '#FF4757'];
+  const phases = [
+    { phase: p1, shots: shots1, color: PHASE_COLORS[0] },
+    { phase: p2, shots: shots2, color: PHASE_COLORS[1] },
+    { phase: p3, shots: shots3, color: PHASE_COLORS[2] }
+  ];
+
+  let px = anchorX, py = anchorY, shotIdx = 0;
+  phases.forEach(({ phase, shots, color }) => {
+    if (!shots) return;
+    const rgb = color.replace('#','');
+    const r = parseInt(rgb.slice(0,2),16), g2 = parseInt(rgb.slice(2,4),16), b = parseInt(rgb.slice(4,6),16);
+    for (let i = 0; i < shots; i++) {
+      px += phase.x_main * scale;
+      py += phase.y_main * scale;
+      const drawX = Math.max(4, Math.min(W - 4, px));
+      const drawY = Math.max(4, Math.min(H - 4, py));
+      const alpha = 0.5 + 0.5 * (shotIdx / Math.max(totalShots - 1, 1));
+      ctx.fillStyle = `rgba(${r},${g2},${b},${alpha})`;
+      const radius = 3 + (shotIdx / Math.max(totalShots - 1, 1)) * 1.5;
+      ctx.beginPath(); ctx.arc(drawX, drawY, radius, 0, Math.PI * 2); ctx.fill();
+      shotIdx++;
+    }
+  });
+
+  // 起点标注
+  ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  ctx.font = '10px monospace';
+  ctx.fillText('起点', anchorX + 8, anchorY - 4);
 }
 
 function closeCustomModal() {
