@@ -1,4 +1,4 @@
-#Requires -Version 5.0
+﻿#Requires -Version 5.0
 # 烽火地带 弹道录制工具
 
 Add-Type @"
