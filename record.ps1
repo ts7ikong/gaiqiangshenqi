@@ -81,13 +81,15 @@ public static class HIDMouse {
     public static volatile bool Started;
     public static string Error = "";
     public static string DevInfo = "";
+    public static string DebugLog = "";
     public static int MoveCount;
     public static readonly Stopwatch Timer = new Stopwatch();
     public static readonly List<int[]> Deltas = new List<int[]>();
 
-    // 手动符号扩展（HidP_GetUsageValue 返回 uint）
+    [DllImport("kernel32.dll")]
+    static extern uint GetLastError();
+
     static int SignExtend(uint raw, uint logicalMax) {
-        // 如果最大值 > 0x7FFF，用 16-bit；否则用 8-bit
         if (logicalMax > 127) {
             return (raw > 32767) ? (int)(raw | 0xFFFF0000) : (int)raw;
         } else {
@@ -96,6 +98,7 @@ public static class HIDMouse {
     }
 
     static void ReadLoop() {
+        var sb = new System.Text.StringBuilder();
         try {
             Guid hid; HidD_GetHidGuid(out hid);
             var hdi = SetupDiGetClassDevs(ref hid, IntPtr.Zero, IntPtr.Zero, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
@@ -118,26 +121,40 @@ public static class HIDMouse {
 
             IntPtr hDev = INVALID, prep = IntPtr.Zero;
             int repLen = 0;
-            uint xMax = 127; // default for sign extension
+            uint xMax = 127;
 
             foreach (var path in paths) {
+                string tail = path.Length > 60 ? path.Substring(path.Length - 60) : path;
                 var h = CreateFile(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero);
-                if (h == INVALID) continue;
+                if (h == INVALID) {
+                    sb.AppendLine(string.Format("OPEN_FAIL(err={0}): ...{1}", GetLastError(), tail));
+                    continue;
+                }
                 IntPtr pd;
-                if (!HidD_GetPreparsedData(h, out pd)) { CloseHandle(h); continue; }
+                if (!HidD_GetPreparsedData(h, out pd)) {
+                    sb.AppendLine("PREP_FAIL: ..." + tail);
+                    CloseHandle(h); continue;
+                }
                 HIDP_CAPS caps;
-                if (HidP_GetCaps(pd, out caps) != HIDP_STATUS_SUCCESS
-                    || caps.UsagePage != 0x01 || caps.Usage != 0x02
-                    || caps.InputReportByteLength == 0) {
+                int rc = HidP_GetCaps(pd, out caps);
+                if (rc != HIDP_STATUS_SUCCESS) {
+                    sb.AppendLine(string.Format("CAPS_FAIL(r={0:X8}): ...{1}", rc, tail));
                     HidD_FreePreparsedData(pd); CloseHandle(h); continue;
                 }
-                hDev = h; prep = pd;
-                repLen = caps.InputReportByteLength;
-                // 根据报告长度猜测轴精度
-                xMax = repLen >= 6 ? (uint)32767 : (uint)127;
-                DevInfo = string.Format("Path={0} Len={1}", path.Substring(path.Length > 30 ? path.Length-30 : 0), repLen);
-                break;
+                sb.AppendLine(string.Format("UP=0x{0:X2} U=0x{1:X2} InLen={2}: ...{3}",
+                    caps.UsagePage, caps.Usage, caps.InputReportByteLength, tail));
+
+                if (caps.UsagePage == 0x01 && caps.Usage == 0x02 && caps.InputReportByteLength > 0 && hDev == INVALID) {
+                    hDev = h; prep = pd;
+                    repLen = caps.InputReportByteLength;
+                    xMax = repLen >= 6 ? (uint)32767 : (uint)127;
+                    DevInfo = string.Format("...{0} Len={1}", tail.Length > 30 ? tail.Substring(tail.Length - 30) : tail, repLen);
+                } else {
+                    HidD_FreePreparsedData(pd); CloseHandle(h);
+                }
             }
+
+            DebugLog = sb.ToString();
 
             if (hDev == INVALID) {
                 Error = string.Format("未找到 HID 鼠标（共 {0} 个 HID 设备）", paths.Count);
@@ -240,6 +257,10 @@ while (-not [HIDMouse]::Started -and ([DateTime]::Now - $t0).TotalSeconds -lt 5)
 
 if ([HIDMouse]::Error -ne "") {
     Write-Host " 错误: $([HIDMouse]::Error)" -ForegroundColor Red
+    $dbgPath = Join-Path $PSScriptRoot "hid_debug.txt"
+    [IO.File]::WriteAllText($dbgPath, [HIDMouse]::DebugLog, [Text.Encoding]::UTF8)
+    Write-Host " 已生成诊断日志: hid_debug.txt" -ForegroundColor Yellow
+    Write-Host " 请把该文件内容发给开发者" -ForegroundColor Yellow
     $null = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
     exit
 }
