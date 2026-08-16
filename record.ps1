@@ -1,5 +1,5 @@
 ﻿#Requires -Version 5.0
-# 烽火地带 弹道录制工具 (Raw Input)
+# 烽火地带 弹道录制工具 (Raw Input + 倒计时)
 
 $src = @'
 using System;
@@ -9,34 +9,29 @@ using System.Diagnostics;
 using System.Threading;
 
 public static class RawMouse {
-    const int  WM_INPUT   = 0x00FF;
+    const int  WM_INPUT        = 0x00FF;
     const uint RIDEV_INPUTSINK = 0x00000100;
-    const uint RID_INPUT  = 0x10000003;
-    const uint RIM_TYPEMOUSE = 0;
+    const uint RID_INPUT       = 0x10000003;
+    const uint RIM_TYPEMOUSE   = 0;
 
     [StructLayout(LayoutKind.Sequential)]
     struct RAWINPUTDEVICE {
-        public ushort usUsagePage;
-        public ushort usUsage;
+        public ushort usUsagePage, usUsage;
         public uint   dwFlags;
         public IntPtr hwndTarget;
     }
 
     [StructLayout(LayoutKind.Sequential)]
     struct RAWINPUTHEADER {
-        public uint   dwType;
-        public uint   dwSize;
-        public IntPtr hDevice;
-        public IntPtr wParam;
+        public uint   dwType, dwSize;
+        public IntPtr hDevice, wParam;
     }
 
     [StructLayout(LayoutKind.Sequential)]
     struct RAWMOUSE {
         public ushort usFlags;
-        public uint   ulButtons;      // low16=usButtonFlags, high16=usButtonData
-        public uint   ulRawButtons;
-        public int    lLastX;
-        public int    lLastY;
+        public uint   ulButtons, ulRawButtons;
+        public int    lLastX, lLastY;
         public uint   ulExtraInformation;
     }
 
@@ -50,23 +45,17 @@ public static class RawMouse {
     struct MSG {
         public IntPtr hwnd;
         public uint   message;
-        public IntPtr wParam;
-        public IntPtr lParam;
+        public IntPtr wParam, lParam;
         public uint   time;
         public int    ptX, ptY;
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]
     struct WNDCLASSEX {
-        public uint   cbSize;
-        public uint   style;
+        public uint   cbSize, style;
         public IntPtr lpfnWndProc;
-        public int    cbClsExtra;
-        public int    cbWndExtra;
-        public IntPtr hInstance;
-        public IntPtr hIcon;
-        public IntPtr hCursor;
-        public IntPtr hbrBackground;
+        public int    cbClsExtra, cbWndExtra;
+        public IntPtr hInstance, hIcon, hCursor, hbrBackground;
         [MarshalAs(UnmanagedType.LPWStr)] public string lpszMenuName;
         [MarshalAs(UnmanagedType.LPWStr)] public string lpszClassName;
         public IntPtr hIconSm;
@@ -77,55 +66,52 @@ public static class RawMouse {
     [DllImport("user32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
     static extern ushort RegisterClassEx(ref WNDCLASSEX wc);
     [DllImport("user32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
-    static extern IntPtr CreateWindowEx(uint exStyle, string cls, string wnd, uint style,
-        int x, int y, int w, int h, IntPtr parent, IntPtr menu, IntPtr hInst, IntPtr param);
+    static extern IntPtr CreateWindowEx(uint ex, string cls, string wnd, uint style,
+        int x, int y, int w, int h, IntPtr parent, IntPtr menu, IntPtr inst, IntPtr p);
     [DllImport("user32.dll")]
     static extern IntPtr DefWindowProc(IntPtr hwnd, uint msg, IntPtr wp, IntPtr lp);
     [DllImport("user32.dll", SetLastError=true)]
     static extern bool RegisterRawInputDevices(
-        [MarshalAs(UnmanagedType.LPArray)] RAWINPUTDEVICE[] devs, uint n, uint sz);
+        [MarshalAs(UnmanagedType.LPArray)] RAWINPUTDEVICE[] d, uint n, uint sz);
     [DllImport("user32.dll")]
-    static extern uint GetRawInputData(IntPtr hRaw, uint cmd, IntPtr data, ref uint size, uint hdrSize);
+    static extern uint GetRawInputData(IntPtr h, uint cmd, IntPtr data, ref uint size, uint hdr);
     [DllImport("user32.dll")]
-    static extern int GetMessage(out MSG m, IntPtr hwnd, uint min, uint max);
+    static extern int GetMessage(out MSG m, IntPtr hwnd, uint mn, uint mx);
     [DllImport("user32.dll")]
     static extern bool TranslateMessage(ref MSG m);
     [DllImport("user32.dll")]
     static extern IntPtr DispatchMessage(ref MSG m);
     [DllImport("kernel32.dll")]
-    static extern IntPtr GetModuleHandle(string name);
-    [DllImport("user32.dll")]
-    static extern short GetAsyncKeyState(int vk);
+    static extern IntPtr GetModuleHandle(string n);
 
     static readonly IntPtr HWND_MESSAGE = new IntPtr(-3);
 
     public static volatile bool Recording, Done, Started;
     public static string Error = "";
     public static int MoveCount, TotalMessages;
-    public static int AsyncL, AsyncR;   // GetAsyncKeyState 检测到的左/右键次数
     public static readonly Stopwatch Timer = new Stopwatch();
     public static readonly List<int[]> Deltas = new List<int[]>();
 
     static WndProc s_proc;
 
-    // Raw Input 只负责接收 X/Y 移动量
     static IntPtr WndProcFn(IntPtr hwnd, uint msg, IntPtr wp, IntPtr lp) {
-        if (msg == WM_INPUT && !Done) {
+        if (msg == WM_INPUT) {
             TotalMessages++;
             uint hdrSize = (uint)Marshal.SizeOf(typeof(RAWINPUTHEADER));
             uint size = 0;
             GetRawInputData(lp, RID_INPUT, IntPtr.Zero, ref size, hdrSize);
-            if (size > 0) {
+            if (size > 0 && Recording) {
                 IntPtr buf = Marshal.AllocHGlobal((int)size);
                 try {
                     if (GetRawInputData(lp, RID_INPUT, buf, ref size, hdrSize) == size) {
                         RAWINPUT ri = (RAWINPUT)Marshal.PtrToStructure(buf, typeof(RAWINPUT));
-                        if (ri.header.dwType == RIM_TYPEMOUSE && Recording
-                            && (ri.mouse.usFlags & 1) == 0) {
+                        if (ri.header.dwType == RIM_TYPEMOUSE && (ri.mouse.usFlags & 1) == 0) {
                             int x = ri.mouse.lLastX, y = ri.mouse.lLastY;
                             if (x != 0 || y != 0) {
                                 MoveCount++;
-                                Deltas.Add(new int[] { x, y, (int)Timer.ElapsedMilliseconds });
+                                lock (Deltas) {
+                                    Deltas.Add(new int[] { x, y, (int)Timer.ElapsedMilliseconds });
+                                }
                             }
                         }
                     }
@@ -135,27 +121,16 @@ public static class RawMouse {
         return DefWindowProc(hwnd, msg, wp, lp);
     }
 
-    // 独立线程用 GetAsyncKeyState 轮询按键（不受 RIDEV_NOLEGACY 影响）
-    static void ButtonPollLoop() {
-        bool wasL = false, wasR = false;
-        while (!Done) {
-            bool curL = (GetAsyncKeyState(0x01) & 0x8000) != 0; // VK_LBUTTON
-            bool curR = (GetAsyncKeyState(0x02) & 0x8000) != 0; // VK_RBUTTON
-            if (curL && !wasL) AsyncL++;
-            if (curR && !wasR) AsyncR++;
+    public static void StartRecording() {
+        lock (Deltas) { Deltas.Clear(); }
+        MoveCount = 0;
+        Timer.Restart();
+        Recording = true;
+    }
 
-            // 触发：右键已按下时，左键按下 → 开始
-            if (curL && curR && !wasL && !Recording) {
-                lock (Deltas) { Deltas.Clear(); }
-                Timer.Restart(); Recording = true;
-            }
-            // 停止：录制中左键松开
-            if (wasL && !curL && Recording) {
-                Recording = false; Done = true;
-            }
-            wasL = curL; wasR = curR;
-            Thread.Sleep(1);
-        }
+    public static void StopRecording() {
+        Recording = false;
+        Done = true;
     }
 
     static void MsgLoop() {
@@ -165,12 +140,12 @@ public static class RawMouse {
             wc.cbSize = (uint)Marshal.SizeOf(typeof(WNDCLASSEX));
             wc.lpfnWndProc = Marshal.GetFunctionPointerForDelegate(s_proc);
             wc.hInstance = GetModuleHandle(null);
-            wc.lpszClassName = "RawMouseWnd";
+            wc.lpszClassName = "RawMouseWnd2";
             if (RegisterClassEx(ref wc) == 0) {
                 Error = "RegisterClassEx failed err=" + Marshal.GetLastWin32Error();
                 Started = true; return;
             }
-            var hwnd = CreateWindowEx(0, "RawMouseWnd", "", 0, 0, 0, 0, 0,
+            var hwnd = CreateWindowEx(0, "RawMouseWnd2", "", 0, 0, 0, 0, 0,
                 HWND_MESSAGE, IntPtr.Zero, GetModuleHandle(null), IntPtr.Zero);
             if (hwnd == IntPtr.Zero) {
                 Error = "CreateWindowEx failed err=" + Marshal.GetLastWin32Error();
@@ -178,10 +153,8 @@ public static class RawMouse {
             }
             var rid = new RAWINPUTDEVICE[] {
                 new RAWINPUTDEVICE {
-                    usUsagePage = 0x01,
-                    usUsage     = 0x02,
-                    dwFlags     = RIDEV_INPUTSINK,
-                    hwndTarget  = hwnd
+                    usUsagePage = 0x01, usUsage = 0x02,
+                    dwFlags = RIDEV_INPUTSINK, hwndTarget = hwnd
                 }
             };
             if (!RegisterRawInputDevices(rid, 1, (uint)Marshal.SizeOf(typeof(RAWINPUTDEVICE)))) {
@@ -191,7 +164,7 @@ public static class RawMouse {
             Started = true;
             MSG m; int ret;
             while (!Done && (ret = GetMessage(out m, IntPtr.Zero, 0, 0)) != 0) {
-                if (ret == -1) { Error = "GetMessage error"; break; }
+                if (ret == -1) break;
                 TranslateMessage(ref m);
                 DispatchMessage(ref m);
             }
@@ -201,10 +174,8 @@ public static class RawMouse {
     }
 
     public static void Start() {
-        var t1 = new Thread(new ThreadStart(MsgLoop));
-        t1.IsBackground = true; t1.Start();
-        var t2 = new Thread(new ThreadStart(ButtonPollLoop));
-        t2.IsBackground = true; t2.Start();
+        var t = new Thread(new ThreadStart(MsgLoop));
+        t.IsBackground = true; t.Start();
     }
 }
 '@
@@ -220,65 +191,67 @@ try {
 
 $host.UI.RawUI.WindowTitle = "烽火地带 弹道录制"
 Write-Host ""
-Write-Host "  烽火地带 弹道录制工具 (Raw Input)" -ForegroundColor Cyan
-Write-Host "------------------------------------" -ForegroundColor DarkGray
-Write-Host ""
-Write-Host " 流程："
-Write-Host "  1. 训练场瞄准靶子，关闭压枪器"
-Write-Host "  2. 此窗口按 Enter，切换回游戏"
-Write-Host "  3. 右键（开镜）+ 左键（开枪），自动开始录制"
-Write-Host "  4. 打完松开左键，自动停止保存"
-Write-Host "  5. 回到浏览器点「载入录制」"
+Write-Host "  烽火地带 弹道录制工具 (倒计时录制)" -ForegroundColor Cyan
+Write-Host "----------------------------------------" -ForegroundColor DarkGray
 Write-Host ""
 
 [RawMouse]::Start()
-
 $t0 = [DateTime]::Now
 while (-not [RawMouse]::Started -and ([DateTime]::Now - $t0).TotalSeconds -lt 5) {
     Start-Sleep -Milliseconds 50
 }
-
 if ([RawMouse]::Error -ne "") {
     Write-Host " 错误: $([RawMouse]::Error)" -ForegroundColor Red
     $null = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
     exit
 }
-
-Write-Host " Raw Input 注册成功" -ForegroundColor DarkGray
-Read-Host " 按 Enter 后切换到游戏，右键+左键开枪即自动开始..."
+Write-Host " Raw Input 就绪" -ForegroundColor DarkGray
 Write-Host ""
-Write-Host " 等待开枪..." -ForegroundColor Cyan
+Write-Host " 流程："
+Write-Host "  1. 训练场瞄准靶子，关闭压枪器"
+Write-Host "  2. 游戏切到全屏窗口化，把此窗口放一边可见"
+Write-Host "  3. 按 Enter → 3秒倒计时 → 立刻开枪压枪"
+Write-Host "  4. 射完后此窗口自动保存"
+Write-Host ""
 
-$timeout = [DateTime]::Now.AddSeconds(60)
-$notified = $false
-$lastReport = [DateTime]::Now
-while (-not [RawMouse]::Done -and [DateTime]::Now -lt $timeout) {
-    if ([RawMouse]::Recording -and -not $notified) {
-        Write-Host " 录制中！打完松开左键..." -ForegroundColor Green
-        $notified = $true
-    }
-    if (([DateTime]::Now - $lastReport).TotalSeconds -ge 5) {
-        Write-Host " [心跳] 移动消息=$([RawMouse]::TotalMessages) 异步左键=$([RawMouse]::AsyncL) 异步右键=$([RawMouse]::AsyncR)" -ForegroundColor DarkGray
-        $lastReport = [DateTime]::Now
-    }
-    Start-Sleep -Milliseconds 50
+$duration = 0
+while ($duration -lt 1 -or $duration -gt 30) {
+    $input = Read-Host " 请输入录制时长（秒，建议4-6秒，对应一梭子时长）"
+    $duration = [int]$input
 }
 
-[RawMouse]::Done = $true
+Write-Host ""
+Read-Host " 准备好后按 Enter 开始倒计时，然后立刻切到游戏射击"
+Write-Host ""
+
+for ($i = 3; $i -ge 1; $i--) {
+    Write-Host " $i..." -ForegroundColor Yellow
+    Start-Sleep -Seconds 1
+}
+Write-Host " 开始！立刻射击！" -ForegroundColor Green
+
+[RawMouse]::StartRecording()
+
+$elapsed = 0
+while ($elapsed -lt $duration) {
+    Start-Sleep -Milliseconds 200
+    $elapsed = [RawMouse]::Timer.ElapsedMilliseconds / 1000.0
+    $bar = "#" * [int]($elapsed / $duration * 20)
+    $pct = [int]($elapsed / $duration * 100)
+    Write-Host -NoNewline "`r [$($bar.PadRight(20))] $pct%  移动点=$([RawMouse]::MoveCount) "
+}
+Write-Host ""
+
+[RawMouse]::StopRecording()
 Start-Sleep -Milliseconds 100
+
 $deltas = [RawMouse]::Deltas
 
 Write-Host ""
-Write-Host " [诊断] 移动消息=$([RawMouse]::TotalMessages) 异步左键=$([RawMouse]::AsyncL) 异步右键=$([RawMouse]::AsyncR) 移动点=$([RawMouse]::MoveCount)" -ForegroundColor DarkGray
+Write-Host " 录制完成：$($deltas.Count) 个数据点  移动消息=$([RawMouse]::TotalMessages)" -ForegroundColor DarkGray
 
 if ($deltas.Count -lt 5) {
-    if ([RawMouse]::TotalMessages -eq 0) {
-        Write-Host " Raw Input 未收到任何消息，游戏可能拦截了输入" -ForegroundColor Red
-    } elseif ([RawMouse]::ButtonEvents -eq 0) {
-        Write-Host " 收到移动消息但未检测到按键，请确认右键+左键触发" -ForegroundColor Yellow
-    } else {
-        Write-Host " 数据太少，请重试" -ForegroundColor Red
-    }
+    Write-Host " 数据太少（移动消息=$([RawMouse]::TotalMessages)），请检查是否在射击" -ForegroundColor Red
     $null = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
     exit
 }
