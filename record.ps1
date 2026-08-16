@@ -94,21 +94,21 @@ public static class RawMouse {
     static extern IntPtr DispatchMessage(ref MSG m);
     [DllImport("kernel32.dll")]
     static extern IntPtr GetModuleHandle(string name);
+    [DllImport("user32.dll")]
+    static extern short GetAsyncKeyState(int vk);
 
     static readonly IntPtr HWND_MESSAGE = new IntPtr(-3);
 
     public static volatile bool Recording, Done, Started;
     public static string Error = "";
-    public static int MoveCount;
-    public static int TotalMessages;
-    public static int ButtonEvents;
-    public static int LDownCount, LUpCount, RDownCount, RUpCount;
+    public static int MoveCount, TotalMessages;
+    public static int AsyncL, AsyncR;   // GetAsyncKeyState 检测到的左/右键次数
     public static readonly Stopwatch Timer = new Stopwatch();
     public static readonly List<int[]> Deltas = new List<int[]>();
 
-    static bool s_left, s_right;
-    static WndProc s_proc; // prevent GC collection
+    static WndProc s_proc;
 
+    // Raw Input 只负责接收 X/Y 移动量
     static IntPtr WndProcFn(IntPtr hwnd, uint msg, IntPtr wp, IntPtr lp) {
         if (msg == WM_INPUT && !Done) {
             TotalMessages++;
@@ -120,28 +120,12 @@ public static class RawMouse {
                 try {
                     if (GetRawInputData(lp, RID_INPUT, buf, ref size, hdrSize) == size) {
                         RAWINPUT ri = (RAWINPUT)Marshal.PtrToStructure(buf, typeof(RAWINPUT));
-                        if (ri.header.dwType == RIM_TYPEMOUSE) {
-                            ushort bf = (ushort)(ri.mouse.ulButtons & 0xFFFF);
-                            bool newL = s_left, newR = s_right;
-                            if ((bf & 0x01) != 0) { newL = true;  ButtonEvents++; LDownCount++; }
-                            if ((bf & 0x02) != 0) { newL = false; ButtonEvents++; LUpCount++;   }
-                            if ((bf & 0x04) != 0) { newR = true;  ButtonEvents++; RDownCount++; }
-                            if ((bf & 0x08) != 0) { newR = false; ButtonEvents++; RUpCount++;   }
-
-                            if (newL && newR && !s_left && !Recording) {
-                                Deltas.Clear(); Timer.Restart(); Recording = true;
-                            }
-                            if (s_left && !newL && Recording) {
-                                Recording = false; Done = true;
-                            }
-                            s_left = newL; s_right = newR;
-
-                            if (Recording && (ri.mouse.usFlags & 1) == 0) {
-                                int x = ri.mouse.lLastX, y = ri.mouse.lLastY;
-                                if (x != 0 || y != 0) {
-                                    MoveCount++;
-                                    Deltas.Add(new int[] { x, y, (int)Timer.ElapsedMilliseconds });
-                                }
+                        if (ri.header.dwType == RIM_TYPEMOUSE && Recording
+                            && (ri.mouse.usFlags & 1) == 0) {
+                            int x = ri.mouse.lLastX, y = ri.mouse.lLastY;
+                            if (x != 0 || y != 0) {
+                                MoveCount++;
+                                Deltas.Add(new int[] { x, y, (int)Timer.ElapsedMilliseconds });
                             }
                         }
                     }
@@ -149,6 +133,29 @@ public static class RawMouse {
             }
         }
         return DefWindowProc(hwnd, msg, wp, lp);
+    }
+
+    // 独立线程用 GetAsyncKeyState 轮询按键（不受 RIDEV_NOLEGACY 影响）
+    static void ButtonPollLoop() {
+        bool wasL = false, wasR = false;
+        while (!Done) {
+            bool curL = (GetAsyncKeyState(0x01) & 0x8000) != 0; // VK_LBUTTON
+            bool curR = (GetAsyncKeyState(0x02) & 0x8000) != 0; // VK_RBUTTON
+            if (curL && !wasL) AsyncL++;
+            if (curR && !wasR) AsyncR++;
+
+            // 触发：右键已按下时，左键按下 → 开始
+            if (curL && curR && !wasL && !Recording) {
+                lock (Deltas) { Deltas.Clear(); }
+                Timer.Restart(); Recording = true;
+            }
+            // 停止：录制中左键松开
+            if (wasL && !curL && Recording) {
+                Recording = false; Done = true;
+            }
+            wasL = curL; wasR = curR;
+            Thread.Sleep(1);
+        }
     }
 
     static void MsgLoop() {
@@ -194,9 +201,10 @@ public static class RawMouse {
     }
 
     public static void Start() {
-        var t = new Thread(new ThreadStart(MsgLoop));
-        t.IsBackground = true;
-        t.Start();
+        var t1 = new Thread(new ThreadStart(MsgLoop));
+        t1.IsBackground = true; t1.Start();
+        var t2 = new Thread(new ThreadStart(ButtonPollLoop));
+        t2.IsBackground = true; t2.Start();
     }
 }
 '@
@@ -250,7 +258,7 @@ while (-not [RawMouse]::Done -and [DateTime]::Now -lt $timeout) {
         $notified = $true
     }
     if (([DateTime]::Now - $lastReport).TotalSeconds -ge 5) {
-        Write-Host " [心跳] 消息=$([RawMouse]::TotalMessages) 左↓=$([RawMouse]::LDownCount) 左↑=$([RawMouse]::LUpCount) 右↓=$([RawMouse]::RDownCount) 右↑=$([RawMouse]::RUpCount)" -ForegroundColor DarkGray
+        Write-Host " [心跳] 移动消息=$([RawMouse]::TotalMessages) 异步左键=$([RawMouse]::AsyncL) 异步右键=$([RawMouse]::AsyncR)" -ForegroundColor DarkGray
         $lastReport = [DateTime]::Now
     }
     Start-Sleep -Milliseconds 50
@@ -261,7 +269,7 @@ Start-Sleep -Milliseconds 100
 $deltas = [RawMouse]::Deltas
 
 Write-Host ""
-Write-Host " [诊断] 消息=$([RawMouse]::TotalMessages) 左↓=$([RawMouse]::LDownCount) 左↑=$([RawMouse]::LUpCount) 右↓=$([RawMouse]::RDownCount) 右↑=$([RawMouse]::RUpCount) 移动=$([RawMouse]::MoveCount)" -ForegroundColor DarkGray
+Write-Host " [诊断] 移动消息=$([RawMouse]::TotalMessages) 异步左键=$([RawMouse]::AsyncL) 异步右键=$([RawMouse]::AsyncR) 移动点=$([RawMouse]::MoveCount)" -ForegroundColor DarkGray
 
 if ($deltas.Count -lt 5) {
     if ([RawMouse]::TotalMessages -eq 0) {
