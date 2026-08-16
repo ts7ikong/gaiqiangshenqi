@@ -100,6 +100,8 @@ public static class RawMouse {
     public static volatile bool Recording, Done, Started;
     public static string Error = "";
     public static int MoveCount;
+    public static int TotalMessages;   // all WM_INPUT received
+    public static int ButtonEvents;    // button state changes
     public static readonly Stopwatch Timer = new Stopwatch();
     public static readonly List<int[]> Deltas = new List<int[]>();
 
@@ -108,6 +110,7 @@ public static class RawMouse {
 
     static IntPtr WndProcFn(IntPtr hwnd, uint msg, IntPtr wp, IntPtr lp) {
         if (msg == WM_INPUT && !Done) {
+            TotalMessages++;
             uint hdrSize = (uint)Marshal.SizeOf(typeof(RAWINPUTHEADER));
             uint size = 0;
             GetRawInputData(lp, RID_INPUT, IntPtr.Zero, ref size, hdrSize);
@@ -119,10 +122,10 @@ public static class RawMouse {
                         if (ri.header.dwType == RIM_TYPEMOUSE) {
                             ushort bf = (ushort)(ri.mouse.ulButtons & 0xFFFF);
                             bool newL = s_left, newR = s_right;
-                            if ((bf & 0x01) != 0) newL = true;   // RI_MOUSE_LEFT_BUTTON_DOWN
-                            if ((bf & 0x02) != 0) newL = false;  // RI_MOUSE_LEFT_BUTTON_UP
-                            if ((bf & 0x04) != 0) newR = true;   // RI_MOUSE_RIGHT_BUTTON_DOWN
-                            if ((bf & 0x08) != 0) newR = false;  // RI_MOUSE_RIGHT_BUTTON_UP
+                            if ((bf & 0x01) != 0) { newL = true;  ButtonEvents++; }
+                            if ((bf & 0x02) != 0) { newL = false; ButtonEvents++; }
+                            if ((bf & 0x04) != 0) { newR = true;  ButtonEvents++; }
+                            if ((bf & 0x08) != 0) { newR = false; ButtonEvents++; }
 
                             if (newL && newR && !s_left && !Recording) {
                                 Deltas.Clear(); Timer.Restart(); Recording = true;
@@ -252,10 +255,16 @@ Start-Sleep -Milliseconds 100
 $deltas = [RawMouse]::Deltas
 
 Write-Host ""
-Write-Host " 移动数据点: $([RawMouse]::MoveCount)  总录制点: $($deltas.Count)" -ForegroundColor DarkGray
+Write-Host " [诊断] WM_INPUT消息: $([RawMouse]::TotalMessages)  按键事件: $([RawMouse]::ButtonEvents)  移动点: $([RawMouse]::MoveCount)" -ForegroundColor DarkGray
 
 if ($deltas.Count -lt 5) {
-    Write-Host " 数据太少，请重试" -ForegroundColor Red
+    if ([RawMouse]::TotalMessages -eq 0) {
+        Write-Host " Raw Input 未收到任何消息，游戏可能拦截了输入" -ForegroundColor Red
+    } elseif ([RawMouse]::ButtonEvents -eq 0) {
+        Write-Host " 收到移动消息但未检测到按键，请确认右键+左键触发" -ForegroundColor Yellow
+    } else {
+        Write-Host " 数据太少，请重试" -ForegroundColor Red
+    }
     $null = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
     exit
 }
