@@ -89,6 +89,8 @@ public static class RawMouse {
     public static volatile bool Recording, Done, Started;
     public static string Error = "";
     public static int MoveCount, TotalMessages;
+    public static int NonZeroMoveMessages;  // 任意时刻 x/y 非零的消息数
+    public static string LastXY = ""; // 最近一条非零消息的 x/y
     public static readonly Stopwatch Timer = new Stopwatch();
     public static readonly List<int[]> Deltas = new List<int[]>();
 
@@ -100,17 +102,21 @@ public static class RawMouse {
             uint hdrSize = (uint)Marshal.SizeOf(typeof(RAWINPUTHEADER));
             uint size = 0;
             GetRawInputData(lp, RID_INPUT, IntPtr.Zero, ref size, hdrSize);
-            if (size > 0 && Recording) {
+            if (size > 0) {
                 IntPtr buf = Marshal.AllocHGlobal((int)size);
                 try {
                     if (GetRawInputData(lp, RID_INPUT, buf, ref size, hdrSize) == size) {
                         RAWINPUT ri = (RAWINPUT)Marshal.PtrToStructure(buf, typeof(RAWINPUT));
-                        if (ri.header.dwType == RIM_TYPEMOUSE && (ri.mouse.usFlags & 1) == 0) {
+                        if (ri.header.dwType == RIM_TYPEMOUSE) {
                             int x = ri.mouse.lLastX, y = ri.mouse.lLastY;
                             if (x != 0 || y != 0) {
-                                MoveCount++;
-                                lock (Deltas) {
-                                    Deltas.Add(new int[] { x, y, (int)Timer.ElapsedMilliseconds });
+                                NonZeroMoveMessages++;
+                                LastXY = x + "," + y;
+                                if (Recording) {
+                                    MoveCount++;
+                                    lock (Deltas) {
+                                        Deltas.Add(new int[] { x, y, (int)Timer.ElapsedMilliseconds });
+                                    }
                                 }
                             }
                         }
@@ -207,28 +213,45 @@ if ([RawMouse]::Error -ne "") {
 }
 Write-Host " Raw Input 就绪" -ForegroundColor DarkGray
 Write-Host ""
-Write-Host " 流程："
-Write-Host "  1. 训练场瞄准靶子，关闭压枪器"
-Write-Host "  2. 游戏切到全屏窗口化，把此窗口放一边可见"
-Write-Host "  3. 按 Enter → 3秒倒计时 → 立刻开枪压枪"
-Write-Host "  4. 射完后此窗口自动保存"
+Write-Host " 重要：录制的是你手动向下拖鼠标压枪的动作" -ForegroundColor Yellow
+Write-Host "       射击时你要一直向下拉鼠标，工具记录这个动作" -ForegroundColor Yellow
 Write-Host ""
 
+# ── 移动检测验证 ──────────────────────────────────
+Write-Host " 第一步：验证鼠标移动检测" -ForegroundColor Cyan
+Write-Host " 现在随意移动鼠标3秒，看下方计数是否增加..."
+$verifyEnd = [DateTime]::Now.AddSeconds(3)
+while ([DateTime]::Now -lt $verifyEnd) {
+    $rem = [int](($verifyEnd - [DateTime]::Now).TotalSeconds) + 1
+    Write-Host -NoNewline "`r  [检测中$rem秒] 移动消息=$([RawMouse]::NonZeroMoveMessages)  最近xy=$([RawMouse]::LastXY)   "
+    Start-Sleep -Milliseconds 100
+}
+Write-Host ""
+if ([RawMouse]::NonZeroMoveMessages -eq 0) {
+    Write-Host " 未检测到任何鼠标移动！Raw Input 解析异常，无法继续" -ForegroundColor Red
+    $null = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+    exit
+}
+Write-Host " 检测正常，共 $([RawMouse]::NonZeroMoveMessages) 条移动消息" -ForegroundColor Green
+Write-Host ""
+
+# ── 录制参数 ──────────────────────────────────────
 $duration = 0
 while ($duration -lt 1 -or $duration -gt 30) {
-    $input = Read-Host " 请输入录制时长（秒，建议4-6秒，对应一梭子时长）"
-    $duration = [int]$input
+    $inp = Read-Host " 录制时长（秒，建议4-6，对应一梭子时长）"
+    $duration = [int]$inp
 }
 
 Write-Host ""
-Read-Host " 准备好后按 Enter 开始倒计时，然后立刻切到游戏射击"
+Write-Host " 流程：按 Enter → 3秒倒计时 → 切到游戏 → 开枪同时向下拉鼠标压枪"
+Read-Host " 准备好后按 Enter"
 Write-Host ""
 
 for ($i = 3; $i -ge 1; $i--) {
     Write-Host " $i..." -ForegroundColor Yellow
     Start-Sleep -Seconds 1
 }
-Write-Host " 开始！立刻射击！" -ForegroundColor Green
+Write-Host " 开始！立刻开枪并向下拉鼠标！" -ForegroundColor Green
 
 [RawMouse]::StartRecording()
 
@@ -238,7 +261,7 @@ while ($elapsed -lt $duration) {
     $elapsed = [RawMouse]::Timer.ElapsedMilliseconds / 1000.0
     $bar = "#" * [int]($elapsed / $duration * 20)
     $pct = [int]($elapsed / $duration * 100)
-    Write-Host -NoNewline "`r [$($bar.PadRight(20))] $pct%  移动点=$([RawMouse]::MoveCount) "
+    Write-Host -NoNewline "`r [$($bar.PadRight(20))] $pct%  录制点=$([RawMouse]::MoveCount) 总移动=$([RawMouse]::NonZeroMoveMessages) "
 }
 Write-Host ""
 
@@ -248,10 +271,10 @@ Start-Sleep -Milliseconds 100
 $deltas = [RawMouse]::Deltas
 
 Write-Host ""
-Write-Host " 录制完成：$($deltas.Count) 个数据点  移动消息=$([RawMouse]::TotalMessages)" -ForegroundColor DarkGray
+Write-Host " 录制完成：录制点=$($deltas.Count)  总移动消息=$([RawMouse]::NonZeroMoveMessages)" -ForegroundColor DarkGray
 
 if ($deltas.Count -lt 5) {
-    Write-Host " 数据太少（移动消息=$([RawMouse]::TotalMessages)），请检查是否在射击" -ForegroundColor Red
+    Write-Host " 数据太少，录制期间请实际移动鼠标向下压枪" -ForegroundColor Red
     $null = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
     exit
 }
