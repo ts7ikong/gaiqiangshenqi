@@ -100,8 +100,9 @@ public static class RawMouse {
     public static volatile bool Recording, Done, Started;
     public static string Error = "";
     public static int MoveCount;
-    public static int TotalMessages;   // all WM_INPUT received
-    public static int ButtonEvents;    // button state changes
+    public static int TotalMessages;
+    public static int ButtonEvents;
+    public static int LDownCount, LUpCount, RDownCount, RUpCount;
     public static readonly Stopwatch Timer = new Stopwatch();
     public static readonly List<int[]> Deltas = new List<int[]>();
 
@@ -122,10 +123,10 @@ public static class RawMouse {
                         if (ri.header.dwType == RIM_TYPEMOUSE) {
                             ushort bf = (ushort)(ri.mouse.ulButtons & 0xFFFF);
                             bool newL = s_left, newR = s_right;
-                            if ((bf & 0x01) != 0) { newL = true;  ButtonEvents++; }
-                            if ((bf & 0x02) != 0) { newL = false; ButtonEvents++; }
-                            if ((bf & 0x04) != 0) { newR = true;  ButtonEvents++; }
-                            if ((bf & 0x08) != 0) { newR = false; ButtonEvents++; }
+                            if ((bf & 0x01) != 0) { newL = true;  ButtonEvents++; LDownCount++; }
+                            if ((bf & 0x02) != 0) { newL = false; ButtonEvents++; LUpCount++;   }
+                            if ((bf & 0x04) != 0) { newR = true;  ButtonEvents++; RDownCount++; }
+                            if ((bf & 0x08) != 0) { newR = false; ButtonEvents++; RUpCount++;   }
 
                             if (newL && newR && !s_left && !Recording) {
                                 Deltas.Clear(); Timer.Restart(); Recording = true;
@@ -249,7 +250,7 @@ while (-not [RawMouse]::Done -and [DateTime]::Now -lt $timeout) {
         $notified = $true
     }
     if (([DateTime]::Now - $lastReport).TotalSeconds -ge 5) {
-        Write-Host " [心跳] WM_INPUT=$([RawMouse]::TotalMessages) 按键=$([RawMouse]::ButtonEvents)" -ForegroundColor DarkGray
+        Write-Host " [心跳] 消息=$([RawMouse]::TotalMessages) 左↓=$([RawMouse]::LDownCount) 左↑=$([RawMouse]::LUpCount) 右↓=$([RawMouse]::RDownCount) 右↑=$([RawMouse]::RUpCount)" -ForegroundColor DarkGray
         $lastReport = [DateTime]::Now
     }
     Start-Sleep -Milliseconds 50
@@ -260,7 +261,7 @@ Start-Sleep -Milliseconds 100
 $deltas = [RawMouse]::Deltas
 
 Write-Host ""
-Write-Host " [诊断] WM_INPUT消息: $([RawMouse]::TotalMessages)  按键事件: $([RawMouse]::ButtonEvents)  移动点: $([RawMouse]::MoveCount)" -ForegroundColor DarkGray
+Write-Host " [诊断] 消息=$([RawMouse]::TotalMessages) 左↓=$([RawMouse]::LDownCount) 左↑=$([RawMouse]::LUpCount) 右↓=$([RawMouse]::RDownCount) 右↑=$([RawMouse]::RUpCount) 移动=$([RawMouse]::MoveCount)" -ForegroundColor DarkGray
 
 if ($deltas.Count -lt 5) {
     if ([RawMouse]::TotalMessages -eq 0) {
