@@ -242,10 +242,15 @@ Write-Host " 等待开枪..." -ForegroundColor Cyan
 
 $timeout = [DateTime]::Now.AddSeconds(60)
 $notified = $false
+$lastReport = [DateTime]::Now
 while (-not [RawMouse]::Done -and [DateTime]::Now -lt $timeout) {
     if ([RawMouse]::Recording -and -not $notified) {
         Write-Host " 录制中！打完松开左键..." -ForegroundColor Green
         $notified = $true
+    }
+    if (([DateTime]::Now - $lastReport).TotalSeconds -ge 5) {
+        Write-Host " [心跳] WM_INPUT=$([RawMouse]::TotalMessages) 按键=$([RawMouse]::ButtonEvents)" -ForegroundColor DarkGray
+        $lastReport = [DateTime]::Now
     }
     Start-Sleep -Milliseconds 50
 }
