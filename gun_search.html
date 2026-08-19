@@ -238,6 +238,7 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;
     <button class="topbar-btn" onclick="showAddForm()" id="addBtn" style="display:none;border-color:rgba(0,208,132,.4);color:var(--green)">➕ 添加</button>
     <button class="topbar-btn" onclick="showInvalidMgr()" id="invalidBtn" style="display:none;border-color:rgba(255,71,87,.4);color:#FF4757">🚫 无效码</button>
     <button class="topbar-btn" onclick="showCustom()" id="customBtn" style="display:none;border-color:rgba(0,194,255,.4);color:var(--accent2)">🔧 自定义配置</button>
+    <a href="video_analyze.html" class="topbar-btn" style="display:none;border-color:rgba(255,170,0,.4);color:var(--yellow);text-decoration:none" id="videoBtn">🎥 视频分析</a>
     <button class="topbar-btn" onclick="resetToUpload()" style="margin-left:auto">📂 重新上传</button>
   </div>
   <div class="main-body">
@@ -1166,7 +1167,7 @@ function showMain(){
   document.getElementById('parseLoading').style.display = 'none';
 
   document.getElementById('mainSection').style.display='block';
-  ['favBtn','zhishiBtn','recommendBtn','addBtn','invalidBtn','customBtn'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='inline-flex';});
+  ['favBtn','zhishiBtn','recommendBtn','addBtn','invalidBtn','customBtn','videoBtn'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='inline-flex';});
   document.getElementById('priceMin').addEventListener('input',updateSlider);
   document.getElementById('priceMax').addEventListener('input',updateSlider);
   loadCurrentGun(); render();
