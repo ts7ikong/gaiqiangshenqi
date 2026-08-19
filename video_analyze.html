@@ -896,7 +896,7 @@ function setStep(n) {
 
 function showP2() {
   document.getElementById('p1').style.display = 'none';
-  document.getElementById('p2').style.display = '';
+  document.getElementById('p2').style.display = 'block';
   document.getElementById('p3').style.display = 'none';
   setStep(2);
 }
@@ -904,7 +904,7 @@ function showP2() {
 function showP3() {
   document.getElementById('p1').style.display = 'none';
   document.getElementById('p2').style.display = 'none';
-  document.getElementById('p3').style.display = '';
+  document.getElementById('p3').style.display = 'block';
   document.getElementById('p3GunName').textContent =
     document.getElementById('gunNameInput').value || '';
   // init result canvas size
