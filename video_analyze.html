@@ -69,7 +69,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
 #p2{display:none}
 .ana-layout{display:grid;grid-template-columns:1fr 280px;gap:16px;align-items:start}
 .video-wrap{position:relative;background:#000;border-radius:10px;overflow:hidden;border:1.5px solid var(--border)}
-#vc{display:block;width:100%;cursor:crosshair}
+#vc{display:block;width:100%;max-height:55vh;cursor:crosshair}
 .video-overlay{position:absolute;top:8px;left:8px;font-size:.75rem;color:#fff;
   background:rgba(0,0,0,.6);padding:3px 8px;border-radius:6px;pointer-events:none}
 .ctrl-bar{display:flex;align-items:center;gap:8px;padding:12px 0;flex-wrap:wrap}
@@ -168,10 +168,11 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
       <strong>追踪原理：</strong>选墙上一个特征点，工具追踪它的<strong>下移距离</strong> = 摄像机上移量 = 后座力，取反即为压枪补偿量
     </div>
   </div>
+  <div id="loadingTip" style="color:var(--accent2);font-size:.88rem;margin-top:20px;display:none">⏳ 正在解析视频...</div>
 </div>
 
 <!-- ══════════ 第二步：标记追踪 ══════════ -->
-<div class="page" id="p2">
+<div class="page" id="p2" style="display:none">
   <div class="ana-layout">
     <!-- 左：视频画面 -->
     <div>
@@ -264,7 +265,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
 </div>
 
 <!-- ══════════ 第三步：导出参数 ══════════ -->
-<div class="page" id="p3">
+<div class="page" id="p3" style="display:none">
   <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap">
     <button class="btn btn-sm" onclick="showP2()">← 返回标记</button>
     <h2 style="font-size:1.2rem;font-weight:800">🎯 计算结果</h2>
@@ -368,19 +369,27 @@ function loadVideo(input) {
 }
 
 function initVideo(file) {
+  document.getElementById('loadingTip').style.display = 'block';
   const url = URL.createObjectURL(file);
   vid.src = url;
+  vid.addEventListener('error', () => {
+    document.getElementById('loadingTip').style.display = 'none';
+    toast('视频加载失败，请尝试其他格式（mp4/mov）');
+  }, {once:true});
   vid.addEventListener('loadedmetadata', () => {
-    duration   = vid.duration;
-    fps        = vid.webkitDecodedFrameCount ? 60 : 30; // guess; will refine
-    totalFrames = Math.floor(duration * 60); // assume 60fps max
+    document.getElementById('loadingTip').style.display = 'none';
+    duration    = vid.duration;
+    totalFrames = Math.floor(duration * 60);
     vc.width  = vid.videoWidth  || 1280;
     vc.height = vid.videoHeight || 720;
-    trajCanvas.width  = trajCanvas.offsetWidth  || 240;
-    trajCanvas.height = trajCanvas.offsetHeight || 180;
-    seekToFrame(0);
     showP2();
-    setStep(2);
+    // 等 #p2 显示后再初始化 canvas 尺寸
+    requestAnimationFrame(() => {
+      trajCanvas.width  = trajCanvas.offsetWidth  || 240;
+      trajCanvas.height = trajCanvas.offsetHeight || 180;
+      seekToFrame(0);
+      setStep(2);
+    });
   }, {once:true});
   vid.load();
 }
