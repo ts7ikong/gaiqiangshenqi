@@ -387,8 +387,9 @@ function initVideo(file) {
     requestAnimationFrame(() => {
       trajCanvas.width  = trajCanvas.offsetWidth  || 240;
       trajCanvas.height = trajCanvas.offsetHeight || 180;
-      seekToFrame(0);
       setStep(2);
+      // seek to a tiny offset so browsers that skip seeked@t=0 still fire it
+      vid.currentTime = 0.001;
     });
   };
   vid.addEventListener('error',           onError, {once:true});
@@ -401,6 +402,7 @@ function initVideo(file) {
   }, 12000);
 
   const url = URL.createObjectURL(file);
+  vid.preload = 'metadata';
   vid.src = url;
   vid.load();
 }
