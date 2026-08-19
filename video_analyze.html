@@ -333,7 +333,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
 <div class="toast" id="toast"></div>
 
 <!-- 隐藏 video 元素 -->
-<video id="vid" style="display:none" preload="auto"></video>
+<video id="vid" style="display:none" preload="none"></video>
 
 <script>
 /* ═══════════════ 状态 ═══════════════ */
@@ -361,7 +361,7 @@ uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag
 uploadZone.addEventListener('drop', e => {
   e.preventDefault(); uploadZone.classList.remove('drag');
   const f = e.dataTransfer.files[0];
-  if (f && f.type.startsWith('video/')) initVideo(f);
+  if (f) initVideo(f);
 });
 
 function loadVideo(input) {
@@ -370,27 +370,38 @@ function loadVideo(input) {
 
 function initVideo(file) {
   document.getElementById('loadingTip').style.display = 'block';
-  const url = URL.createObjectURL(file);
-  vid.src = url;
-  vid.addEventListener('error', () => {
+
+  // 先注册监听器，再设置 src，避免 preload 导致 loadedmetadata 先于监听器触发
+  const onError = () => {
     document.getElementById('loadingTip').style.display = 'none';
-    toast('视频加载失败，请尝试其他格式（mp4/mov）');
-  }, {once:true});
-  vid.addEventListener('loadedmetadata', () => {
+    toast('视频加载失败，请尝试 mp4 格式');
+  };
+  const onMeta = () => {
+    clearTimeout(metaTimer);
     document.getElementById('loadingTip').style.display = 'none';
     duration    = vid.duration;
     totalFrames = Math.floor(duration * 60);
-    vc.width  = vid.videoWidth  || 1280;
-    vc.height = vid.videoHeight || 720;
+    vc.width    = vid.videoWidth  || 1280;
+    vc.height   = vid.videoHeight || 720;
     showP2();
-    // 等 #p2 显示后再初始化 canvas 尺寸
     requestAnimationFrame(() => {
       trajCanvas.width  = trajCanvas.offsetWidth  || 240;
       trajCanvas.height = trajCanvas.offsetHeight || 180;
       seekToFrame(0);
       setStep(2);
     });
-  }, {once:true});
+  };
+  vid.addEventListener('error',           onError, {once:true});
+  vid.addEventListener('loadedmetadata',  onMeta,  {once:true});
+
+  const metaTimer = setTimeout(() => {
+    vid.removeEventListener('loadedmetadata', onMeta);
+    document.getElementById('loadingTip').style.display = 'none';
+    toast('解析超时，请检查视频格式（推荐 mp4）');
+  }, 12000);
+
+  const url = URL.createObjectURL(file);
+  vid.src = url;
   vid.load();
 }
 
