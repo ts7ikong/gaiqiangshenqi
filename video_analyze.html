@@ -19,7 +19,7 @@ body::before{content:'';position:fixed;inset:0;
   pointer-events:none;z-index:0}
 
 /* ── 步骤条 ── */
-.steps{display:flex;align-items:center;gap:0;padding:18px 24px;position:relative;z-index:1;
+.steps{display:flex;align-items:center;gap:0;padding:18px 24px;
   background:rgba(13,15,26,.92);border-bottom:1px solid var(--border);
   backdrop-filter:blur(16px);position:sticky;top:0;z-index:100}
 .step{display:flex;align-items:center;gap:8px;font-size:.82rem;color:var(--sub);cursor:default}
@@ -69,33 +69,21 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
 #p2{display:none}
 .ana-layout{display:grid;grid-template-columns:1fr 280px;gap:16px;align-items:start}
 .video-wrap{position:relative;background:#000;border-radius:10px;overflow:hidden;border:1.5px solid var(--border)}
-#vc{display:block;width:100%;max-height:55vh;cursor:crosshair}
+#vc{display:block;width:100%;max-height:50vh}
 .video-overlay{position:absolute;top:8px;left:8px;font-size:.75rem;color:#fff;
   background:rgba(0,0,0,.6);padding:3px 8px;border-radius:6px;pointer-events:none}
-.ctrl-bar{display:flex;align-items:center;gap:8px;padding:12px 0;flex-wrap:wrap}
-.frame-info{font-family:monospace;font-size:.82rem;color:var(--sub);background:var(--card2);
-  padding:4px 10px;border-radius:6px;white-space:nowrap}
-.mode-badge{padding:3px 10px;border-radius:20px;font-size:.75rem;font-weight:700}
-.mode-mark{background:rgba(255,51,102,.15);color:var(--accent);border:1px solid rgba(255,51,102,.3)}
-.mode-auto{background:rgba(0,208,132,.15);color:var(--green);border:1px solid rgba(0,208,132,.3)}
+
+/* ── 波形 ── */
+#waveCanvas{width:100%;height:72px;display:block;border-radius:8px;background:#080a14;cursor:crosshair}
 
 /* ── 右侧面板 ── */
 .side-panel{display:flex;flex-direction:column;gap:12px}
 .panel-title{font-size:.85rem;font-weight:700;color:var(--accent2);margin-bottom:8px;
   display:flex;align-items:center;justify-content:space-between}
-.point-list{max-height:260px;overflow-y:auto;display:flex;flex-direction:column;gap:4px}
-.pt-item{display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:6px;
-  background:var(--card2);font-size:.75rem;font-family:monospace}
-.pt-idx{color:var(--yellow);font-weight:700;min-width:24px}
-.pt-pos{color:var(--text);flex:1}
-.pt-t{color:var(--sub)}
-.pt-del{margin-left:auto;cursor:pointer;color:#FF4757;opacity:.6}
-.pt-del:hover{opacity:1}
 .empty-hint{text-align:center;padding:20px;color:var(--sub);font-size:.8rem}
 
 /* ── 弹道预览 ── */
-#trajCanvas{width:100%;height:180px;display:block;border-radius:8px;background:#080a14}
-.traj-legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:6px;font-size:.72rem;color:var(--sub)}
+#trajCanvas{width:100%;height:160px;display:block;border-radius:8px;background:#080a14}
 
 /* ── 参数区 ── */
 #p3{display:none}
@@ -133,10 +121,10 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
 <div class="steps">
   <div class="step active" id="s1"><span class="step-num">1</span><span>加载视频</span></div>
   <div class="step-sep"></div>
-  <div class="step" id="s2"><span class="step-num">2</span><span>标记追踪</span></div>
+  <div class="step" id="s2"><span class="step-num">2</span><span>音频分析</span></div>
   <div class="step-sep"></div>
   <div class="step" id="s3"><span class="step-num">3</span><span>导出参数</span></div>
-  <div style="margin-left:auto;display:flex;gap:8px">
+  <div style="margin-left:auto">
     <a href="gun_search.html" class="btn btn-sm">← 返回主工具</a>
   </div>
 </div>
@@ -147,99 +135,95 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
     <div style="font-size:3rem;filter:drop-shadow(0 0 20px rgba(0,194,255,.5))">🎥</div>
   </div>
   <div class="title" style="text-align:center">弹道视频分析</div>
-  <div class="sub" style="text-align:center">从录屏视频中提取后座力轨迹，自动生成压枪参数</div>
+  <div class="sub" style="text-align:center">自动分析枪声时间点 · 追踪视频弹道偏移 · 生成压枪参数</div>
 
   <div style="display:flex;justify-content:center">
     <div class="upload-zone" id="uploadZone">
       <input type="file" id="videoInput" accept="video/*" onchange="loadVideo(this)">
       <div style="font-size:2rem;margin-bottom:10px">📂</div>
       <div style="font-size:1rem;font-weight:600;margin-bottom:6px">拖拽或点击上传视频</div>
-      <div style="font-size:.82rem;color:var(--sub)">mp4 / mov / avi · 推荐60fps录制</div>
+      <div style="font-size:.82rem;color:var(--sub)">mp4 / mov / avi · 推荐 60fps 录制</div>
     </div>
   </div>
 
   <div style="display:flex;justify-content:center">
     <div class="tip-box">
       <strong>录制步骤：</strong><br>
-      1. 进入训练场，站在墙前（离近一点，弹孔看得清）<br>
-      2. 用 OBS / Shadowplay 录屏（60fps）<br>
+      1. 进入训练场，站在墙前（近距离），<strong>右键开镜（ADS）</strong><br>
+      2. 用 OBS / Shadowplay 录屏（60fps），确保<strong>游戏音效开启</strong><br>
       3. <strong>完全不动鼠标</strong>，直接开枪打完一梭子<br>
       4. 把录好的视频拖入上方<br><br>
-      <strong>追踪原理：</strong>选墙上一个特征点，工具追踪它的<strong>下移距离</strong> = 摄像机上移量 = 后座力，取反即为压枪补偿量
+      <strong>分析原理：</strong>工具从<strong>枪声波形</strong>检测每发子弹的精确时刻，再追踪视频中墙面背景的位移，得到每发子弹的后座力大小。
     </div>
   </div>
-  <div id="loadingTip" style="color:var(--accent2);font-size:.88rem;margin-top:20px;display:none">⏳ 正在解析视频...</div>
+  <div id="loadingTip" style="color:var(--accent2);font-size:.88rem;margin-top:20px;display:none;text-align:center">⏳ 正在解析视频...</div>
 </div>
 
-<!-- ══════════ 第二步：标记追踪 ══════════ -->
+<!-- ══════════ 第二步：音频分析 ══════════ -->
 <div class="page" id="p2" style="display:none">
   <div class="ana-layout">
-    <!-- 左：视频画面 -->
+
+    <!-- 左：视频首帧 + 波形 -->
     <div>
+      <!-- 视频首帧预览 -->
       <div class="video-wrap">
         <canvas id="vc"></canvas>
-        <div class="video-overlay" id="overlay">帧 0 / 0 · 0.000s</div>
+        <div class="video-overlay" id="overlay">第一帧</div>
       </div>
 
-      <!-- 控制条 -->
-      <div class="ctrl-bar">
-        <button class="btn btn-sm" onclick="seekDelta(-1)" title="←">◀ 上帧</button>
-        <button class="btn btn-sm" onclick="seekDelta(1)" title="→">下帧 ▶</button>
-        <button class="btn btn-sm" onclick="seekDelta(-5)">-5</button>
-        <button class="btn btn-sm" onclick="seekDelta(5)">+5</button>
-        <div class="frame-info" id="frameInfo">0 / 0</div>
-        <div class="mode-badge mode-mark" id="modeBadge">🖱 点击标记</div>
+      <!-- 音频波形 -->
+      <div style="margin-top:10px">
+        <div style="font-size:.78rem;color:var(--sub);margin-bottom:5px">
+          🔊 音频波形
+          <span style="color:rgba(255,51,102,.9)">───</span> 检测到的枪声
+          <span style="color:rgba(255,170,0,.7)">- - -</span> 阈值线
+        </div>
+        <canvas id="waveCanvas"></canvas>
       </div>
 
-      <!-- 进度条（自动追踪时显示） -->
-      <div id="progressBar">
+      <!-- 阈值控制 -->
+      <div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap">
+        <span style="font-size:.8rem;color:var(--sub);white-space:nowrap">检测阈值</span>
+        <input type="range" id="thresholdSlider" min="0.03" max="0.95" step="0.01" value="0.20"
+          oninput="onThresholdChange(this.value)" style="flex:1;min-width:80px;max-width:220px">
+        <span id="thresholdVal" style="font-family:monospace;color:var(--yellow);min-width:36px">0.20</span>
+        <button class="btn btn-sm" onclick="redetectShots()">🔄 重新检测</button>
+      </div>
+
+      <!-- 状态 + 开始按钮 -->
+      <div style="display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap">
+        <div style="padding:4px 14px;border-radius:20px;background:rgba(0,208,132,.12);
+          border:1px solid rgba(0,208,132,.3);font-size:.82rem;color:var(--green);white-space:nowrap">
+          🎯 检测到 <span id="shotCount">0</span> 发
+        </div>
+        <div id="audioStatus" style="font-size:.78rem;color:var(--sub);flex:1">正在分析音频...</div>
+        <button class="btn btn-sm btn-primary" onclick="startBulletTrack()" id="trackBtn" disabled>
+          ⚡ 开始分析弹道 →
+        </button>
+      </div>
+
+      <!-- 追踪进度条 -->
+      <div id="progressBar" style="display:none;margin-top:10px">
         <div class="prog-track"><div class="prog-inner" id="progInner"></div></div>
         <div class="prog-label" id="progLabel">正在追踪...</div>
       </div>
 
-      <!-- 操作按钮 -->
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
-        <button class="btn btn-sm btn-blue" onclick="startAutoTrack()" id="autoBtn">⚡ 自动追踪（标记第1帧后点）</button>
-        <button class="btn btn-sm" onclick="undoPoint()">↩ 撤销</button>
-        <button class="btn btn-sm" onclick="clearPoints()" style="color:#FF4757;border-color:rgba(255,71,87,.3)">🗑 清空</button>
-        <button class="btn btn-sm btn-primary" onclick="goToPhase3()" id="calcBtn" style="margin-left:auto">
-          计算参数 →
-        </button>
-      </div>
-
-      <div style="margin-top:10px;padding:10px 14px;border-radius:8px;background:rgba(0,194,255,.06);
-          border:1px solid rgba(0,194,255,.2);font-size:.8rem;color:var(--sub);line-height:1.6">
-        💡 <strong style="color:var(--accent2)">操作说明：</strong>
-        在墙上找一个明显特征（弹坑、污点、裂缝）。
-        <strong style="color:#fff">第1帧</strong>点击标记它的位置，逐帧前进后<strong style="color:#fff">每次都点击同一个点</strong>。
-        也可点「自动追踪」让工具自动处理。
+      <!-- 提示 -->
+      <div style="margin-top:12px;padding:10px 14px;border-radius:8px;
+          background:rgba(0,194,255,.06);border:1px solid rgba(0,194,255,.2);
+          font-size:.78rem;color:var(--sub);line-height:1.7">
+        💡 波形中每个红线对应一次枪声。若检测到的发数不对，拖动<strong style="color:#fff">阈值</strong>滑条调整：<br>
+        · 检测过多 → 阈值调高 &nbsp;· 检测过少 → 阈值调低<br>
+        · 音频解析失败时工具将用下方射速估算时间点。
       </div>
     </div>
 
     <!-- 右侧面板 -->
     <div class="side-panel">
-      <!-- 标记列表 -->
-      <div class="card">
-        <div class="panel-title">
-          <span>📍 已标记 <span id="ptCount" style="color:var(--green)">0</span> 帧</span>
-        </div>
-        <div class="point-list" id="pointList">
-          <div class="empty-hint">在左侧画面点击墙上特征点</div>
-        </div>
-      </div>
 
-      <!-- 弹道预览 -->
+      <!-- 设置 -->
       <div class="card">
-        <div class="panel-title"><span>弹道轨迹预览</span></div>
-        <canvas id="trajCanvas"></canvas>
-        <div class="traj-legend">
-          <span>↑ 摄像机上移（后座力）</span>
-        </div>
-      </div>
-
-      <!-- 快捷设置 -->
-      <div class="card">
-        <div class="panel-title"><span>⚙️ 基本设置</span></div>
+        <div class="panel-title"><span>⚙️ 设置</span></div>
         <div style="margin-bottom:10px">
           <label class="label">枪名（备注用）</label>
           <input type="text" id="gunNameInput" placeholder="如：AKM突击步枪"
@@ -247,18 +231,33 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
               background:rgba(20,20,40,.8);color:var(--text);font-size:.83rem;outline:none">
         </div>
         <div class="param-row">
-          <span class="param-key">总弹数</span>
+          <span class="param-key">最多追踪弹数</span>
           <input type="number" id="totalBullets" value="30" min="1" max="200"
-            style="width:70px;text-align:center" onchange="renderTraj()">
+            style="width:70px;text-align:center">
         </div>
-        <div class="param-row" style="margin-top:8px">
-          <span class="param-key">射速 (RPM)</span>
-          <input type="number" id="rpmInput" value="600" min="100" max="1500"
-            style="width:80px;text-align:center">
+        <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+          <div style="font-size:.72rem;color:var(--sub);margin-bottom:6px">音频失败时的备用射速</div>
+          <div class="param-row">
+            <span class="param-key">射速 (RPM)</span>
+            <input type="number" id="rpmInput" value="600" min="100" max="1500"
+              style="width:80px;text-align:center">
+          </div>
         </div>
-        <div style="font-size:.72rem;color:var(--sub);margin-top:4px">
-          💡 不知道射速可先保持默认，后续可调整
+      </div>
+
+      <!-- 枪声列表 -->
+      <div class="card">
+        <div class="panel-title"><span>🕐 枪声时间线</span></div>
+        <div id="shotList" style="max-height:220px;overflow-y:auto;font-size:.74rem;
+          font-family:monospace;line-height:1.9;color:var(--sub)">
+          <div class="empty-hint">等待音频分析...</div>
         </div>
+      </div>
+
+      <!-- 弹道预览（追踪完成后显示） -->
+      <div class="card" id="trajCard" style="display:none">
+        <div class="panel-title"><span>弹道预览</span></div>
+        <canvas id="trajCanvas"></canvas>
       </div>
     </div>
   </div>
@@ -267,7 +266,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
 <!-- ══════════ 第三步：导出参数 ══════════ -->
 <div class="page" id="p3" style="display:none">
   <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap">
-    <button class="btn btn-sm" onclick="showP2()">← 返回标记</button>
+    <button class="btn btn-sm" onclick="showP2()">← 返回分析</button>
     <h2 style="font-size:1.2rem;font-weight:800">🎯 计算结果</h2>
     <div id="p3GunName" style="font-size:.85rem;color:var(--accent2)"></div>
     <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
@@ -303,23 +302,20 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
     </div>
   </div>
 
-  <!-- 弹道对比 -->
+  <!-- 弹道对比图 -->
   <div class="card" style="margin-bottom:16px">
     <div style="font-size:.82rem;font-weight:700;color:var(--accent2);margin-bottom:8px">弹道对比</div>
-    <canvas id="resultCanvas" style="width:100%;height:200px;display:block;
-      border-radius:8px;background:#080a14"></canvas>
+    <canvas id="resultCanvas" style="width:100%;height:200px;display:block;border-radius:8px;background:#080a14"></canvas>
     <div style="display:flex;gap:16px;margin-top:6px;font-size:.72rem;color:var(--sub);flex-wrap:wrap">
       <span><span style="color:var(--accent2)">●</span> 原始后座力</span>
       <span><span style="color:var(--green)">●</span> 阶段1</span>
-      <span><span style="color:#8B5CFF)">●</span> 阶段2</span>
+      <span><span style="color:#8B5CFF">●</span> 阶段2</span>
       <span><span style="color:#FF4757">●</span> 阶段3</span>
     </div>
   </div>
 
   <!-- 三阶段参数 -->
-  <div class="params-grid" id="paramsGrid">
-    <!-- 由 JS 生成 -->
-  </div>
+  <div class="params-grid" id="paramsGrid"></div>
 
   <!-- 原始数据 -->
   <div class="card" style="margin-top:12px">
@@ -336,30 +332,39 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
 <video id="vid" style="display:none" preload="none"></video>
 
 <script>
-/* ═══════════════ 状态 ═══════════════ */
+/* ═══════════════ State ═══════════════ */
 const vid = document.getElementById('vid');
 const vc  = document.getElementById('vc');
 const ctx = vc.getContext('2d');
-const trajCanvas = document.getElementById('trajCanvas');
-const trajCtx    = trajCanvas.getContext('2d');
 const resultCanvas = document.getElementById('resultCanvas');
-const resCtx       = resultCanvas.getContext('2d');
+const resCtx = resultCanvas.getContext('2d');
 
-let totalFrames = 0, fps = 30, duration = 0;
-let currentFrame = 0;
-let points = [];           // {frameIndex, x, y, t}  -- raw canvas coords
-let templateData = null;   // ImageData patch for auto-track
+let duration = 0;
+let loadedFile = null;
+
+// Audio
+let audioBuffer  = null;
+let rmsData      = [];
+let shotTimes    = [];   // seconds, from audio peak detection
+const RMS_WIN_MS = 3;    // 3ms peak-detection window
+
+// Template tracking
+let templateData = null;
 let templateCX = 0, templateCY = 0;
-let isAutoTracking = false;
-const TMPL_HALF = 18;      // template half-size (36x36 patch)
-const SEARCH_R  = 200;     // search radius px (at original res)
+const TMPL_HALF = 28;   // 56×56 template patch
+const TRACK_R   = 60;   // search radius for incremental tracking (small = fast)
 
-/* ═══════════════ Step 1: Load ═══════════════ */
+// Results
+let perBulletDy = [];   // screen-px Y shift per bullet (positive = scene moved down = recoil up)
+let calcScale   = 1;
+
+/* ═══════════════ Step 1: Upload ═══════════════ */
 const uploadZone = document.getElementById('uploadZone');
 uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('drag'); });
 uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag'));
 uploadZone.addEventListener('drop', e => {
-  e.preventDefault(); uploadZone.classList.remove('drag');
+  e.preventDefault();
+  uploadZone.classList.remove('drag');
   const f = e.dataTransfer.files[0];
   if (f) initVideo(f);
 });
@@ -369,228 +374,200 @@ function loadVideo(input) {
 }
 
 function initVideo(file) {
+  loadedFile = file;
   document.getElementById('loadingTip').style.display = 'block';
 
-  // 先注册监听器，再设置 src，避免 preload 导致 loadedmetadata 先于监听器触发
   const onError = () => {
     document.getElementById('loadingTip').style.display = 'none';
     toast('视频加载失败，请尝试 mp4 格式');
   };
+
   const onMeta = () => {
     clearTimeout(metaTimer);
     document.getElementById('loadingTip').style.display = 'none';
-    duration    = vid.duration;
-    totalFrames = Math.floor(duration * 60);
-    vc.width    = vid.videoWidth  || 1280;
-    vc.height   = vid.videoHeight || 720;
+    duration  = vid.duration;
+    vc.width  = vid.videoWidth  || 1280;
+    vc.height = vid.videoHeight || 720;
     showP2();
     requestAnimationFrame(() => {
-      trajCanvas.width  = trajCanvas.offsetWidth  || 240;
-      trajCanvas.height = trajCanvas.offsetHeight || 180;
       setStep(2);
-      // seek to a tiny offset so browsers that skip seeked@t=0 still fire it
+      // Seek to first frame so canvas shows the wall
       vid.currentTime = 0.001;
     });
+    // Kick off audio analysis in the background
+    analyzeAudio(file);
   };
-  vid.addEventListener('error',           onError, {once:true});
-  vid.addEventListener('loadedmetadata',  onMeta,  {once:true});
+
+  vid.addEventListener('error',          onError, { once: true });
+  vid.addEventListener('loadedmetadata', onMeta,  { once: true });
 
   const metaTimer = setTimeout(() => {
     vid.removeEventListener('loadedmetadata', onMeta);
     document.getElementById('loadingTip').style.display = 'none';
     toast('解析超时，请检查视频格式（推荐 mp4）');
-  }, 12000);
+  }, 15000);
 
-  const url = URL.createObjectURL(file);
   vid.preload = 'metadata';
-  vid.src = url;
+  vid.src = URL.createObjectURL(file);
   vid.load();
 }
 
-/* ═══════════════ Frame navigation ═══════════════ */
-function frameToTime(f) { return f / 60; }
-function timeToFrame(t) { return Math.round(t * 60); }
-
-function seekToFrame(f) {
-  f = Math.max(0, Math.min(f, Math.floor(duration * 60)));
-  currentFrame = f;
-  vid.currentTime = frameToTime(f);
-}
-
-vid.addEventListener('seeked', drawFrame);
-
-function drawFrame() {
+vid.addEventListener('seeked', () => {
   ctx.drawImage(vid, 0, 0, vc.width, vc.height);
-  // draw markers
-  points.forEach((p, i) => {
-    const isLast = i === points.length - 1;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, isLast ? 7 : 5, 0, Math.PI*2);
-    ctx.fillStyle = isLast ? '#FF3366' : 'rgba(0,194,255,.7)';
-    ctx.fill();
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-    // connect line
-    if (i > 0) {
-      ctx.beginPath();
-      ctx.moveTo(points[i-1].x, points[i-1].y);
-      ctx.lineTo(p.x, p.y);
-      ctx.strokeStyle = 'rgba(0,208,132,.5)';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-    }
-  });
-  // overlay
-  document.getElementById('overlay').textContent =
-    `帧 ${currentFrame} / ~${Math.floor(duration*60)} · ${vid.currentTime.toFixed(3)}s`;
-  document.getElementById('frameInfo').textContent =
-    `${currentFrame} / ~${Math.floor(duration*60)}`;
-  renderTraj();
+  document.getElementById('overlay').textContent = `${vid.currentTime.toFixed(3)}s`;
+});
+
+/* ═══════════════ Audio Analysis ═══════════════ */
+async function analyzeAudio(file) {
+  const statusEl = document.getElementById('audioStatus');
+  statusEl.textContent = '正在解码音频...';
+  try {
+    const buf  = await file.arrayBuffer();
+    const actx = new (window.AudioContext || window.webkitAudioContext)();
+    audioBuffer = await actx.decodeAudioData(buf);
+    await actx.close();
+    computeRMS();
+    redetectShots();
+    drawWaveform();
+    statusEl.textContent =
+      `时长 ${audioBuffer.duration.toFixed(1)}s · 采样率 ${audioBuffer.sampleRate}Hz`;
+  } catch (e) {
+    statusEl.textContent = '音频解析失败，将用射速估算（' + (e.message||e) + '）';
+  }
+  document.getElementById('trackBtn').disabled = false;
 }
 
-function seekDelta(d) {
-  const newF = currentFrame + d;
-  if (newF >= 0 && newF <= duration*60) {
-    seekToFrame(newF);
+function computeRMS() {
+  const sr  = audioBuffer.sampleRate;
+  const win = Math.max(1, Math.floor(sr * RMS_WIN_MS / 1000));
+  const nCh = audioBuffer.numberOfChannels;
+  const chs = Array.from({ length: nCh }, (_, c) => audioBuffer.getChannelData(c));
+  const len = audioBuffer.length;
+  rmsData = [];
+  for (let i = 0; i + win <= len; i += win) {
+    let peak = 0;
+    for (let c = 0; c < nCh; c++) {
+      const ch = chs[c];
+      for (let j = 0; j < win; j++) {
+        const v = Math.abs(ch[i + j]);
+        if (v > peak) peak = v;
+      }
+    }
+    rmsData.push(peak);
   }
 }
 
-// Keyboard nav
-document.addEventListener('keydown', e => {
-  if (document.getElementById('p2').style.display === 'none') return;
-  if (e.key === 'ArrowLeft')  { e.preventDefault(); seekDelta(-1); }
-  if (e.key === 'ArrowRight') { e.preventDefault(); seekDelta(1); }
-  if (e.key === 'ArrowUp')    { e.preventDefault(); seekDelta(-5); }
-  if (e.key === 'ArrowDown')  { e.preventDefault(); seekDelta(5); }
-  if (e.key === 'z' && e.ctrlKey) { e.preventDefault(); undoPoint(); }
-});
-
-/* ═══════════════ Canvas click → mark point ═══════════════ */
-vc.addEventListener('click', e => {
-  if (isAutoTracking) return;
-  const rect = vc.getBoundingClientRect();
-  const scaleX = vc.width  / rect.width;
-  const scaleY = vc.height / rect.height;
-  const x = (e.clientX - rect.left) * scaleX;
-  const y = (e.clientY - rect.top)  * scaleY;
-  addPoint(x, y, vid.currentTime, currentFrame);
-  // capture template from first point
-  if (points.length === 1) captureTemplate(x, y);
-});
-
-function addPoint(x, y, t, f) {
-  // replace if same frame already exists
-  const ex = points.findIndex(p => p.frameIndex === f);
-  if (ex >= 0) points.splice(ex, 1);
-  points.push({x, y, t, frameIndex: f});
-  points.sort((a,b) => a.frameIndex - b.frameIndex);
-  updatePointList();
-  drawFrame();
+function onThresholdChange(v) {
+  document.getElementById('thresholdVal').textContent = parseFloat(v).toFixed(2);
+  redetectShots();
+  drawWaveform();
 }
 
+function redetectShots() {
+  if (!rmsData.length) return;
+  const threshold = parseFloat(document.getElementById('thresholdSlider').value);
+  const sr  = audioBuffer.sampleRate;
+  const win = Math.max(1, Math.floor(sr * RMS_WIN_MS / 1000));
+  const minGap = Math.ceil(50 / RMS_WIN_MS); // ≥50ms between shots
+
+  shotTimes = [];
+  let lastIdx = -minGap * 2;
+  for (let i = 1; i < rmsData.length - 1; i++) {
+    if (rmsData[i] > threshold &&
+        rmsData[i] >= rmsData[i - 1] &&
+        rmsData[i] >= rmsData[i + 1] &&
+        i - lastIdx >= minGap) {
+      shotTimes.push((i * win) / sr);
+      lastIdx = i;
+    }
+  }
+  document.getElementById('shotCount').textContent = shotTimes.length;
+  updateShotList();
+}
+
+function updateShotList() {
+  const el = document.getElementById('shotList');
+  if (!shotTimes.length) {
+    el.innerHTML = '<div class="empty-hint">未检测到枪声，请降低阈值</div>';
+    return;
+  }
+  el.innerHTML = shotTimes.map((t, i) => {
+    const gap = i === 0 ? '—' : ((t - shotTimes[i - 1]) * 1000).toFixed(0) + 'ms';
+    return `<div>
+      <span style="color:var(--yellow)">第${i + 1}发</span>
+      <span style="color:var(--accent2)"> ${t.toFixed(3)}s</span>
+      <span style="color:var(--sub)"> +${gap}</span>
+    </div>`;
+  }).join('');
+  el.scrollTop = 0;
+}
+
+function drawWaveform() {
+  const wc   = document.getElementById('waveCanvas');
+  const wctx = wc.getContext('2d');
+  const cw   = wc.width  = wc.offsetWidth  || 600;
+  const ch   = wc.height = 72;
+  wctx.clearRect(0, 0, cw, ch);
+  if (!rmsData.length) return;
+
+  const n = rmsData.length;
+
+  // Waveform
+  wctx.beginPath();
+  wctx.strokeStyle = 'rgba(0,194,255,.65)';
+  wctx.lineWidth = 1;
+  for (let i = 0; i < n; i++) {
+    const x  = (i / n) * cw;
+    const h2 = rmsData[i] * (ch - 4) * 0.48;
+    i === 0 ? wctx.moveTo(x, ch / 2 - h2) : wctx.lineTo(x, ch / 2 - h2);
+  }
+  wctx.stroke();
+
+  // Threshold line
+  const thr = parseFloat(document.getElementById('thresholdSlider').value);
+  const ty  = ch / 2 - thr * (ch - 4) * 0.48;
+  wctx.setLineDash([4, 3]);
+  wctx.strokeStyle = 'rgba(255,170,0,.6)';
+  wctx.lineWidth = 1;
+  wctx.beginPath(); wctx.moveTo(0, ty); wctx.lineTo(cw, ty);
+  wctx.stroke();
+  wctx.setLineDash([]);
+
+  // Shot markers
+  if (!audioBuffer) return;
+  const dur = audioBuffer.duration;
+  shotTimes.forEach(t => {
+    const x = (t / dur) * cw;
+    wctx.strokeStyle = 'rgba(255,51,102,.9)';
+    wctx.lineWidth = 1.5;
+    wctx.beginPath(); wctx.moveTo(x, 0); wctx.lineTo(x, ch);
+    wctx.stroke();
+  });
+}
+
+/* ═══════════════ Template matching ═══════════════ */
 function captureTemplate(cx, cy) {
   const half = TMPL_HALF;
   const x0 = Math.max(0, Math.floor(cx - half));
   const y0 = Math.max(0, Math.floor(cy - half));
-  const w  = Math.min(half*2, vc.width  - x0);
-  const h  = Math.min(half*2, vc.height - y0);
+  const w  = Math.min(half * 2, vc.width  - x0);
+  const h  = Math.min(half * 2, vc.height - y0);
   templateData = ctx.getImageData(x0, y0, w, h);
-  templateCX = cx; templateCY = cy;
-}
-
-function undoPoint() {
-  if (points.length) { points.pop(); updatePointList(); drawFrame(); }
-}
-
-function clearPoints() {
-  points = []; templateData = null; updatePointList(); drawFrame();
-}
-
-function updatePointList() {
-  document.getElementById('ptCount').textContent = points.length;
-  const list = document.getElementById('pointList');
-  if (!points.length) {
-    list.innerHTML = '<div class="empty-hint">在左侧画面点击墙上特征点</div>';
-    return;
-  }
-  const base = points[0];
-  list.innerHTML = points.map((p, i) => {
-    const dy = (p.y - base.y).toFixed(1);
-    return `<div class="pt-item">
-      <span class="pt-idx">#${i+1}</span>
-      <span class="pt-pos">(${p.x.toFixed(0)},${p.y.toFixed(0)}) Δy=${dy>0?'+':''}${dy}</span>
-      <span class="pt-t">${p.t.toFixed(3)}s</span>
-      <span class="pt-del" onclick="removePoint(${i})">✕</span>
-    </div>`;
-  }).join('');
-  list.scrollTop = list.scrollHeight;
-}
-
-function removePoint(i) {
-  points.splice(i, 1);
-  updatePointList(); drawFrame();
-}
-
-/* ═══════════════ Auto tracking ═══════════════ */
-async function startAutoTrack() {
-  if (!templateData) { toast('请先在第1帧点击标记一个参考点'); return; }
-  if (isAutoTracking) return;
-  isAutoTracking = true;
-  document.getElementById('autoBtn').disabled = true;
-  document.getElementById('progressBar').style.display = 'block';
-
-  const startFrame = points[0] ? points[0].frameIndex : 0;
-  const endTime    = duration;
-  const step       = 2; // process every 2nd frame
-  let curX = templateCX, curY = templateCY;
-  let f = startFrame + step;
-  const totalF = Math.floor(duration * 60) - startFrame;
-
-  while (f <= Math.floor(duration * 60)) {
-    await seekFrame(f);
-    const {x, y} = findTemplate(curX, curY);
-    addPoint(x, y, vid.currentTime, f);
-    curX = x; curY = y;
-    // update template periodically
-    if (points.length % 10 === 0) captureTemplate(x, y);
-
-    const pct = ((f - startFrame) / totalF * 100).toFixed(0);
-    document.getElementById('progInner').style.width = pct + '%';
-    document.getElementById('progLabel').textContent =
-      `追踪中... ${pct}% (帧${f}) Δy=${(y - points[0].y).toFixed(1)}px`;
-    f += step;
-    // yield to browser
-    await new Promise(r => setTimeout(r, 0));
-  }
-
-  isAutoTracking = false;
-  document.getElementById('autoBtn').disabled = false;
-  document.getElementById('progressBar').style.display = 'none';
-  toast('自动追踪完成！共 ' + points.length + ' 个点');
-}
-
-function seekFrame(f) {
-  return new Promise(resolve => {
-    vid.currentTime = frameToTime(f);
-    vid.addEventListener('seeked', () => {
-      ctx.drawImage(vid, 0, 0, vc.width, vc.height);
-      resolve();
-    }, {once:true});
-  });
+  templateCX = cx;
+  templateCY = cy;
 }
 
 function findTemplate(lastX, lastY) {
-  // SAD template matching in search window
+  if (!templateData) return { x: lastX, y: lastY };
   const tmpl = templateData;
   const tw = tmpl.width, th = tmpl.height;
-  const sx = Math.max(0, Math.floor(lastX - SEARCH_R - tw/2));
-  const sy = Math.max(0, Math.floor(lastY - SEARCH_R - th/2));
-  const sw = Math.min(SEARCH_R * 2 + tw, vc.width  - sx);
-  const sh = Math.min(SEARCH_R * 2 + th, vc.height - sy);
-  if (sw <= 0 || sh <= 0) return {x: lastX, y: lastY};
+  const sx = Math.max(0, Math.floor(lastX - TRACK_R - tw / 2));
+  const sy = Math.max(0, Math.floor(lastY - TRACK_R - th / 2));
+  const sw = Math.min(TRACK_R * 2 + tw, vc.width  - sx);
+  const sh = Math.min(TRACK_R * 2 + th, vc.height - sy);
+  if (sw <= tw || sh <= th) return { x: lastX, y: lastY };
 
-  const frameData = ctx.getImageData(sx, sy, sw, sh);
+  const fd = ctx.getImageData(sx, sy, sw, sh);
   let bestX = lastX, bestY = lastY, bestSAD = Infinity;
 
   for (let dy = 0; dy <= sh - th; dy++) {
@@ -599,100 +576,126 @@ function findTemplate(lastX, lastY) {
       outer:
       for (let ty = 0; ty < th; ty++) {
         for (let tx = 0; tx < tw; tx++) {
-          const fi = ((dy+ty)*sw + (dx+tx)) * 4;
-          const ti = (ty*tw + tx) * 4;
-          sad += Math.abs(frameData.data[fi]   - tmpl.data[ti]);
-          sad += Math.abs(frameData.data[fi+1] - tmpl.data[ti+1]);
-          sad += Math.abs(frameData.data[fi+2] - tmpl.data[ti+2]);
-          if (sad >= bestSAD) { break outer; }
+          const fi = ((dy + ty) * sw + (dx + tx)) * 4;
+          const ti = (ty * tw + tx) * 4;
+          sad += Math.abs(fd.data[fi]     - tmpl.data[ti]);
+          sad += Math.abs(fd.data[fi + 1] - tmpl.data[ti + 1]);
+          sad += Math.abs(fd.data[fi + 2] - tmpl.data[ti + 2]);
+          if (sad >= bestSAD) break outer;
         }
       }
       if (sad < bestSAD) {
         bestSAD = sad;
-        bestX = sx + dx + tw/2;
-        bestY = sy + dy + th/2;
+        bestX = sx + dx + tw / 2;
+        bestY = sy + dy + th / 2;
       }
     }
   }
-  return {x: bestX, y: bestY};
+  return { x: bestX, y: bestY };
 }
 
-/* ═══════════════ Trajectory preview ═══════════════ */
-function renderTraj() {
-  const cw = trajCanvas.width  = trajCanvas.offsetWidth  || 240;
-  const ch = trajCanvas.height = trajCanvas.offsetHeight || 180;
-  trajCtx.clearRect(0, 0, cw, ch);
-  if (points.length < 2) return;
-
-  const base = points[0];
-  const dys  = points.map(p => p.y - base.y);
-  const maxDy = Math.max(1, ...dys.map(Math.abs));
-
-  trajCtx.strokeStyle = 'rgba(0,194,255,.8)';
-  trajCtx.lineWidth   = 2;
-  trajCtx.beginPath();
-  points.forEach((p, i) => {
-    const px = (i / (points.length-1)) * (cw - 20) + 10;
-    const py = ch - ((p.y - base.y) / maxDy * (ch-20) + 10);
-    i === 0 ? trajCtx.moveTo(px, py) : trajCtx.lineTo(px, py);
+function seekToTime(t) {
+  return new Promise(resolve => {
+    vid.addEventListener('seeked', () => {
+      ctx.drawImage(vid, 0, 0, vc.width, vc.height);
+      resolve();
+    }, { once: true });
+    vid.currentTime = Math.max(0, Math.min(t, duration - 0.001));
   });
-  trajCtx.stroke();
+}
 
-  // dots
-  points.forEach((p, i) => {
-    const px = (i / (points.length-1)) * (cw - 20) + 10;
-    const py = ch - ((p.y - base.y) / maxDy * (ch-20) + 10);
-    trajCtx.beginPath();
-    trajCtx.arc(px, py, 3, 0, Math.PI*2);
-    trajCtx.fillStyle = '#00C2FF';
-    trajCtx.fill();
+/* ═══════════════ Bullet tracking ═══════════════ */
+async function startBulletTrack() {
+  const total = parseInt(document.getElementById('totalBullets').value) || 30;
+
+  // Build timestamps: prefer audio, fall back to RPM
+  let times = shotTimes.slice(0, total);
+  if (!times.length) {
+    const rpm = parseFloat(document.getElementById('rpmInput').value) || 600;
+    const step = 60 / rpm;
+    for (let i = 0; i < total; i++) {
+      const t = i * step;
+      if (t >= duration) break;
+      times.push(t);
+    }
+  }
+  if (!times.length) { toast('无法确定子弹时间，请检查音频或输入射速'); return; }
+
+  document.getElementById('trackBtn').disabled = true;
+  document.getElementById('progressBar').style.display = 'block';
+  document.getElementById('progInner').style.width = '0%';
+
+  // Seek to first shot, capture reference template.
+  // Use upper-left region (15%,15%) to stay away from bullet holes that cluster near center.
+  await seekToTime(times[0]);
+  const refX = vc.width  * 0.15;
+  const refY = vc.height * 0.15;
+  captureTemplate(refX, refY);
+
+  let curX = refX, curY = refY;
+  const cumY = [0]; // cumulative scene Y-shift per bullet relative to first shot
+
+  for (let i = 1; i < times.length; i++) {
+    await seekToTime(times[i]);
+    const found = findTemplate(curX, curY);
+    const dy = found.y - curY;           // how much did scene move down THIS step
+    cumY.push(cumY[i - 1] + dy);
+    curX = found.x;
+    curY = found.y;
+
+    // Refresh template every 8 bullets to handle lighting drift,
+    // but keep from drifting into the bullet-hole zone
+    if (i % 8 === 0) captureTemplate(curX, curY);
+
+    const pct = Math.round((i / (times.length - 1)) * 100);
+    document.getElementById('progInner').style.width = pct + '%';
+    document.getElementById('progLabel').textContent =
+      `追踪 ${i + 1}/${times.length} 发 · 累计偏移 ${cumY[i].toFixed(1)}px`;
+    await new Promise(r => setTimeout(r, 0)); // yield to browser
+  }
+
+  // per-bullet delta: scene moved down by this many px between consecutive shots
+  perBulletDy = cumY.map((v, i) => (i === 0 ? 0 : v - cumY[i - 1]));
+
+  document.getElementById('progressBar').style.display = 'none';
+  document.getElementById('trackBtn').disabled = false;
+
+  // Show trajectory preview
+  renderTrajPreview(cumY);
+  document.getElementById('trajCard').style.display = '';
+
+  toast(`完成！${times.length} 发，总位移 ${cumY[cumY.length - 1].toFixed(0)}px`);
+  goToPhase3();
+}
+
+function renderTrajPreview(cumY) {
+  const tc  = document.getElementById('trajCanvas');
+  const tctx = tc.getContext('2d');
+  const cw = tc.width  = tc.offsetWidth  || 240;
+  const ch = tc.height = tc.offsetHeight || 160;
+  tctx.clearRect(0, 0, cw, ch);
+  if (cumY.length < 2) return;
+  const maxAbs = Math.max(1, ...cumY.map(Math.abs));
+  tctx.strokeStyle = 'rgba(0,194,255,.85)';
+  tctx.lineWidth = 2;
+  tctx.beginPath();
+  cumY.forEach((v, i) => {
+    const x = (i / (cumY.length - 1)) * (cw - 20) + 10;
+    const y = ch / 2 - (v / maxAbs) * (ch / 2 - 10);
+    i === 0 ? tctx.moveTo(x, y) : tctx.lineTo(x, y);
   });
+  tctx.stroke();
 }
 
 /* ═══════════════ Step 3: Parameters ═══════════════ */
-let perBulletDy = []; // dy per bullet in screen pixels
-let calcScale = 1;
-
 function goToPhase3() {
-  if (points.length < 3) { toast('至少需要3个标记点'); return; }
-  computeBulletDy();
+  if (!perBulletDy.length) { toast('弹道数据为空'); return; }
   showP3();
   setStep(3);
-  renderResult();
-}
-
-function computeBulletDy() {
-  // Interpolate trajectory to per-bullet deltas using RPM
-  const rpm   = parseFloat(document.getElementById('rpmInput').value) || 600;
-  const total = parseInt(document.getElementById('totalBullets').value) || 30;
-  const interval = 60000 / rpm; // ms per bullet
-
-  const base = points[0];
-  const endT  = points[points.length-1].t;
-  const startT = base.t;
-
-  perBulletDy = [];
-  for (let b = 0; b < total; b++) {
-    const t = startT + b * (interval / 1000);
-    if (t > endT + 0.05) break;
-    // interpolate y at time t
-    const y = interpY(t);
-    const yPrev = b === 0 ? base.y : interpY(startT + (b-1) * (interval/1000));
-    perBulletDy.push(y - yPrev); // positive = moved down = recoil up
-  }
-}
-
-function interpY(t) {
-  if (!points.length) return 0;
-  if (t <= points[0].t) return points[0].y;
-  if (t >= points[points.length-1].t) return points[points.length-1].y;
-  for (let i = 1; i < points.length; i++) {
-    if (points[i].t >= t) {
-      const alpha = (t - points[i-1].t) / (points[i].t - points[i-1].t);
-      return points[i-1].y + alpha * (points[i].y - points[i-1].y);
-    }
-  }
-  return points[points.length-1].y;
+  setTimeout(() => {
+    resultCanvas.width = resultCanvas.offsetWidth || 800;
+    renderResult();
+  }, 50);
 }
 
 function onScaleChange(v) {
@@ -704,170 +707,160 @@ function onScaleChange(v) {
 function renderResult() {
   if (!perBulletDy.length) return;
   const flipY = document.getElementById('flipY').checked;
-  const sign  = flipY ? 1 : -1; // default: compensation = negative (push down in device coords)
+  const sign  = flipY ? 1 : -1;
   const s1 = parseInt(document.getElementById('split1').value) || 10;
   const s2 = parseInt(document.getElementById('split2').value) || 25;
-  const rpm = parseFloat(document.getElementById('rpmInput').value) || 600;
-  const interval = Math.round(60000 / rpm);
 
-  // Build phase data
+  // Compute actual interval from audio, or fall back to RPM
+  let interval;
+  if (shotTimes.length > 1) {
+    interval = Math.round(
+      (shotTimes[Math.min(shotTimes.length - 1, perBulletDy.length - 1)] - shotTimes[0]) /
+      (Math.min(shotTimes.length, perBulletDy.length) - 1) * 1000
+    );
+  } else {
+    interval = Math.round(60000 / (parseFloat(document.getElementById('rpmInput').value) || 600));
+  }
+
   const phases = [
     perBulletDy.slice(0, s1),
     perBulletDy.slice(s1, s2),
     perBulletDy.slice(s2)
   ];
 
-  const params = phases.map((ph, i) => {
+  const params = phases.map(ph => {
     if (!ph.length) return null;
-    const avgDy = ph.reduce((a,b) => a+b, 0) / ph.length;
+    const avgDy = ph.reduce((a, b) => a + b, 0) / ph.length;
     const yMain = Math.round(sign * avgDy * calcScale);
     return {
       time:      ph.length,
       time_max:  ph.length + 2,
-      delay_min: Math.max(5, Math.round(interval * 0.8)),
-      delay_max: Math.round(interval * 1.2),
+      delay_min: Math.max(5, Math.round(interval * 0.85)),
+      delay_max: Math.round(interval * 1.15),
       x_main:    0,
       y_main:    yMain,
       x_alt:     0,
       y_alt:     0,
-      interval:  interval
+      interval
     };
   }).filter(Boolean);
 
-  renderResultCanvas(phases, sign);
+  renderResultCanvas(phases, sign, s1, s2);
   renderParamsGrid(params);
-  renderRawData();
-
-  // store for export
+  document.getElementById('rawDataView').textContent =
+    'dy/bullet: [' + perBulletDy.map(v => v.toFixed(1)).join(', ') + ']';
   window._calcParams = params;
 }
 
-function renderResultCanvas(phases, sign) {
-  const cw = resultCanvas.width  = resultCanvas.offsetWidth  || 800;
+function renderResultCanvas(phases, sign, s1, s2) {
+  const cw = resultCanvas.width  = resultCanvas.offsetWidth || 800;
   const ch = resultCanvas.height = 200;
   resCtx.clearRect(0, 0, cw, ch);
 
-  const all  = perBulletDy;
+  const all = perBulletDy;
   const cumAll = [];
   let acc = 0;
   all.forEach(d => { acc += d; cumAll.push(acc); });
   const maxAbs = Math.max(1, ...cumAll.map(Math.abs));
+  const colors = ['#00C2FF', '#00D084', '#8B5CFF', '#FF4757'];
 
-  const colors = ['#00C2FF','#00D084','#8B5CFF','#FF4757'];
-
-  // original recoil (cumulative)
+  // Original recoil curve
   resCtx.strokeStyle = colors[0];
   resCtx.lineWidth = 1.5;
-  resCtx.setLineDash([4,3]);
+  resCtx.setLineDash([4, 3]);
   resCtx.beginPath();
   cumAll.forEach((v, i) => {
-    const px = (i / Math.max(1, all.length-1)) * (cw-20) + 10;
-    const py = ch/2 - (v / maxAbs) * (ch/2 - 10);
+    const px = (i / Math.max(1, all.length - 1)) * (cw - 20) + 10;
+    const py = ch / 2 - (v / maxAbs) * (ch / 2 - 10);
     i === 0 ? resCtx.moveTo(px, py) : resCtx.lineTo(px, py);
   });
   resCtx.stroke();
   resCtx.setLineDash([]);
 
-  // phase lines
-  const s1 = parseInt(document.getElementById('split1').value) || 10;
-  const s2 = parseInt(document.getElementById('split2').value) || 25;
+  // Phase compensation curves
   const splits = [0, s1, s2, all.length];
-
   phases.forEach((ph, pi) => {
     if (!ph.length) return;
-    const start = splits[pi];
-    const avgDy = ph.reduce((a,b)=>a+b,0) / ph.length;
-    const compY = sign * avgDy * calcScale;
-
-    resCtx.strokeStyle = colors[pi+1];
+    const start  = splits[pi];
+    const avgDy  = ph.reduce((a, b) => a + b, 0) / ph.length;
+    const compY  = sign * avgDy * calcScale;
+    resCtx.strokeStyle = colors[pi + 1];
     resCtx.lineWidth = 2.5;
     resCtx.beginPath();
     let cumComp = 0;
     ph.forEach((_, bi) => {
       cumComp += compY;
       const gi = start + bi;
-      const px = (gi / Math.max(1, all.length-1)) * (cw-20) + 10;
-      const py = ch/2 - (cumComp / maxAbs) * (ch/2 - 10);
+      const px = (gi / Math.max(1, all.length - 1)) * (cw - 20) + 10;
+      const py = ch / 2 - (cumComp / maxAbs) * (ch / 2 - 10);
       bi === 0 ? resCtx.moveTo(px, py) : resCtx.lineTo(px, py);
     });
     resCtx.stroke();
   });
 
-  // zero line
+  // Zero line
   resCtx.strokeStyle = 'rgba(255,255,255,.15)';
   resCtx.lineWidth = 1;
-  resCtx.beginPath();
-  resCtx.moveTo(0, ch/2); resCtx.lineTo(cw, ch/2);
+  resCtx.beginPath(); resCtx.moveTo(0, ch / 2); resCtx.lineTo(cw, ch / 2);
   resCtx.stroke();
 
-  // phase dividers
+  // Phase dividers
   [s1, s2].forEach(split => {
     if (split >= all.length) return;
-    const px = (split / Math.max(1, all.length-1)) * (cw-20) + 10;
+    const px = (split / Math.max(1, all.length - 1)) * (cw - 20) + 10;
     resCtx.strokeStyle = 'rgba(255,255,255,.3)';
     resCtx.lineWidth = 1;
-    resCtx.setLineDash([4,4]);
-    resCtx.beginPath();
-    resCtx.moveTo(px, 0); resCtx.lineTo(px, ch);
+    resCtx.setLineDash([4, 4]);
+    resCtx.beginPath(); resCtx.moveTo(px, 0); resCtx.lineTo(px, ch);
     resCtx.stroke();
     resCtx.setLineDash([]);
   });
 }
 
 function renderParamsGrid(params) {
-  const names = ['阶段1（前段）','阶段2（中段）','阶段3（后段）'];
-  const colors = ['rgba(0,208,132,.15)','rgba(139,92,255,.15)','rgba(255,71,87,.15)'];
-  const borderColors = ['rgba(0,208,132,.3)','rgba(139,92,255,.3)','rgba(255,71,87,.3)'];
-  const textColors = ['#00D084','#8B5CFF','#FF4757'];
-  const grid = document.getElementById('paramsGrid');
-  grid.innerHTML = params.map((p, i) => `
-    <div class="phase-box" style="background:${colors[i]};border-color:${borderColors[i]}">
-      <h4 style="color:${textColors[i]}">${names[i]}</h4>
-      ${row('弹数 time',        p.time)}
-      ${row('弹数最大 time_max', p.time_max)}
+  const names   = ['阶段1（前段）', '阶段2（中段）', '阶段3（后段）'];
+  const colors  = ['rgba(0,208,132,.15)', 'rgba(139,92,255,.15)', 'rgba(255,71,87,.15)'];
+  const borders = ['rgba(0,208,132,.3)',  'rgba(139,92,255,.3)',  'rgba(255,71,87,.3)'];
+  const texts   = ['#00D084', '#8B5CFF', '#FF4757'];
+  document.getElementById('paramsGrid').innerHTML = params.map((p, i) => `
+    <div class="phase-box" style="background:${colors[i]};border-color:${borders[i]}">
+      <h4 style="color:${texts[i]}">${names[i]}</h4>
+      ${row('弹数 time',          p.time)}
+      ${row('弹数上限 time_max',  p.time_max)}
       ${row('延迟最小 delay_min', p.delay_min + 'ms')}
       ${row('延迟最大 delay_max', p.delay_max + 'ms')}
-      ${row('X偏移 x_main',     p.x_main)}
-      ${row('Y偏移 y_main',     p.y_main, textColors[i])}
-      ${row('间隔 interval',    p.interval + 'ms')}
-    </div>
-  `).join('');
+      ${row('X偏移 x_main',      p.x_main)}
+      ${row('Y偏移 y_main',      p.y_main, texts[i])}
+      ${row('间隔 interval',     p.interval + 'ms')}
+    </div>`).join('');
 }
 
 function row(k, v, color) {
   return `<div class="param-row">
     <span class="param-key">${k}</span>
-    <span class="param-val" ${color?`style="color:${color}"`:''}>${v}</span>
+    <span class="param-val"${color ? ` style="color:${color}"` : ''}>${v}</span>
   </div>`;
-}
-
-function renderRawData() {
-  document.getElementById('rawDataView').textContent =
-    'dy/bullet: [' + perBulletDy.map(v => v.toFixed(1)).join(', ') + ']';
 }
 
 /* ═══════════════ Export ═══════════════ */
 function exportJson() {
-  if (!points.length) { toast('没有数据'); return; }
-  const rpm      = parseFloat(document.getElementById('rpmInput').value) || 600;
-  const interval = 1000 / (rpm/60);
-  const base     = points[0];
-
-  const deltas = [];
-  let lastY = base.y;
-  perBulletDy.forEach((dy, i) => {
-    deltas.push([0, Math.round(dy * calcScale), Math.round(i * interval)]);
-  });
+  if (!perBulletDy.length) { toast('没有数据'); return; }
+  const useAudio = shotTimes.length >= perBulletDy.length;
+  const rpm = parseFloat(document.getElementById('rpmInput').value) || 600;
+  const baseT = useAudio ? shotTimes[0] : 0;
 
   let cumX = 0, cumY = 0;
-  const out = deltas.map(d => {
-    cumX += -d[0]; cumY += -d[1];
-    return `{"x":${cumX},"y":${cumY},"t":${d[2]}}`;
+  const out = perBulletDy.map((dy, i) => {
+    const t_ms = useAudio
+      ? Math.round((shotTimes[i] - baseT) * 1000)
+      : Math.round(i * 60000 / rpm);
+    cumX += 0;
+    cumY += -Math.round(dy * calcScale);
+    return `{"x":${cumX},"y":${cumY},"t":${t_ms}}`;
   });
   const json = '[' + out.join(',') + ']';
-  const blob = new Blob([json], {type:'application/json'});
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
+  a.href = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
   a.download = 'trajectory.json';
   a.click();
   toast('已下载 trajectory.json');
@@ -877,7 +870,7 @@ function copyParams() {
   const ps = window._calcParams;
   if (!ps) { toast('请先点击计算'); return; }
   const lines = ps.map((p, i) => [
-    `=== 阶段${i+1} ===`,
+    `=== 阶段${i + 1} ===`,
     `time=${p.time}  time_max=${p.time_max}`,
     `delay_min=${p.delay_min}  delay_max=${p.delay_max}`,
     `x_main=${p.x_main}  y_main=${p.y_main}`,
@@ -888,9 +881,9 @@ function copyParams() {
 
 /* ═══════════════ Navigation ═══════════════ */
 function setStep(n) {
-  [1,2,3].forEach(i => {
-    const el = document.getElementById('s'+i);
-    el.className = 'step ' + (i < n ? 'done' : i === n ? 'active' : '');
+  [1, 2, 3].forEach(i => {
+    document.getElementById('s' + i).className =
+      'step ' + (i < n ? 'done' : i === n ? 'active' : '');
   });
 }
 
@@ -907,11 +900,6 @@ function showP3() {
   document.getElementById('p3').style.display = 'block';
   document.getElementById('p3GunName').textContent =
     document.getElementById('gunNameInput').value || '';
-  // init result canvas size
-  setTimeout(() => {
-    resultCanvas.width = resultCanvas.offsetWidth || 800;
-    renderResult();
-  }, 50);
 }
 
 /* ═══════════════ Toast ═══════════════ */
@@ -919,19 +907,8 @@ function toast(msg) {
   const el = document.getElementById('toast');
   el.textContent = msg;
   el.classList.add('show');
-  setTimeout(() => el.classList.remove('show'), 2500);
+  setTimeout(() => el.classList.remove('show'), 2800);
 }
-
-/* 初始化 trajCanvas 尺寸 */
-window.addEventListener('resize', () => {
-  trajCanvas.width  = trajCanvas.offsetWidth  || 240;
-  trajCanvas.height = trajCanvas.offsetHeight || 180;
-  renderTraj();
-});
-setTimeout(() => {
-  trajCanvas.width  = trajCanvas.offsetWidth  || 240;
-  trajCanvas.height = trajCanvas.offsetHeight || 180;
-}, 100);
 </script>
 </body>
 </html>
