@@ -232,7 +232,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
         </div>
         <div class="param-row">
           <span class="param-key">最多追踪弹数</span>
-          <input type="number" id="totalBullets" value="30" min="1" max="200"
+          <input type="number" id="totalBullets" value="200" min="1" max="500"
             style="width:70px;text-align:center">
         </div>
         <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
@@ -265,7 +265,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
 
 <!-- ══════════ 第三步：导出参数 ══════════ -->
 <div class="page" id="p3" style="display:none">
-  <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap">
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap">
     <button class="btn btn-sm" onclick="showP2()">← 返回分析</button>
     <h2 style="font-size:1.2rem;font-weight:800">🎯 计算结果</h2>
     <div id="p3GunName" style="font-size:.85rem;color:var(--accent2)"></div>
@@ -273,6 +273,18 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
       <button class="btn btn-sm btn-blue" onclick="exportJson()">📥 trajectory.json</button>
       <button class="btn btn-sm btn-primary" onclick="copyParams()">📋 复制参数</button>
     </div>
+  </div>
+
+  <!-- 有效弹数 + 保存按钮 -->
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;
+      padding:10px 14px;border-radius:10px;background:rgba(0,208,132,.06);border:1px solid rgba(0,208,132,.2)">
+    <span style="font-size:.82rem;color:var(--sub);white-space:nowrap">有效弹数：</span>
+    <input type="number" id="useBullets" min="1" max="500" placeholder="全部"
+      style="width:72px;text-align:center" oninput="renderResult()">
+    <span id="totalTracked" style="font-size:.78rem;color:var(--green)"></span>
+    <button class="btn btn-sm btn-green" onclick="saveToCustom()" style="margin-left:auto">
+      📥 保存到自定义配置
+    </button>
   </div>
 
   <!-- 缩放校准 -->
@@ -692,6 +704,8 @@ function goToPhase3() {
   if (!perBulletDy.length) { toast('弹道数据为空'); return; }
   showP3();
   setStep(3);
+  document.getElementById('useBullets').value = perBulletDy.length;
+  document.getElementById('totalTracked').textContent = `共追踪 ${perBulletDy.length} 发`;
   setTimeout(() => {
     resultCanvas.width = resultCanvas.offsetWidth || 800;
     renderResult();
@@ -711,21 +725,25 @@ function renderResult() {
   const s1 = parseInt(document.getElementById('split1').value) || 10;
   const s2 = parseInt(document.getElementById('split2').value) || 25;
 
+  // Slice to effective bullet count
+  const useN    = parseInt(document.getElementById('useBullets').value) || perBulletDy.length;
+  const activeDy = perBulletDy.slice(0, Math.min(useN, perBulletDy.length));
+
   // Compute actual interval from audio, or fall back to RPM
   let interval;
   if (shotTimes.length > 1) {
-    interval = Math.round(
-      (shotTimes[Math.min(shotTimes.length - 1, perBulletDy.length - 1)] - shotTimes[0]) /
-      (Math.min(shotTimes.length, perBulletDy.length) - 1) * 1000
-    );
+    const useLen = Math.min(activeDy.length, shotTimes.length);
+    interval = useLen > 1
+      ? Math.round((shotTimes[useLen - 1] - shotTimes[0]) / (useLen - 1) * 1000)
+      : Math.round(60000 / (parseFloat(document.getElementById('rpmInput').value) || 600));
   } else {
     interval = Math.round(60000 / (parseFloat(document.getElementById('rpmInput').value) || 600));
   }
 
   const phases = [
-    perBulletDy.slice(0, s1),
-    perBulletDy.slice(s1, s2),
-    perBulletDy.slice(s2)
+    activeDy.slice(0, s1),
+    activeDy.slice(s1, s2),
+    activeDy.slice(s2)
   ];
 
   const params = phases.map(ph => {
@@ -745,19 +763,17 @@ function renderResult() {
     };
   }).filter(Boolean);
 
-  renderResultCanvas(phases, sign, s1, s2);
+  renderResultCanvas(activeDy, phases, sign, s1, s2);
   renderParamsGrid(params);
   document.getElementById('rawDataView').textContent =
-    'dy/bullet: [' + perBulletDy.map(v => v.toFixed(1)).join(', ') + ']';
+    'dy/bullet: [' + activeDy.map(v => v.toFixed(1)).join(', ') + ']';
   window._calcParams = params;
 }
 
-function renderResultCanvas(phases, sign, s1, s2) {
+function renderResultCanvas(all, phases, sign, s1, s2) {
   const cw = resultCanvas.width  = resultCanvas.offsetWidth || 800;
   const ch = resultCanvas.height = 200;
   resCtx.clearRect(0, 0, cw, ch);
-
-  const all = perBulletDy;
   const cumAll = [];
   let acc = 0;
   all.forEach(d => { acc += d; cumAll.push(acc); });
@@ -845,17 +861,19 @@ function row(k, v, color) {
 /* ═══════════════ Export ═══════════════ */
 function exportJson() {
   if (!perBulletDy.length) { toast('没有数据'); return; }
-  const useAudio = shotTimes.length >= perBulletDy.length;
+  const useN   = parseInt(document.getElementById('useBullets').value) || perBulletDy.length;
+  const dy     = perBulletDy.slice(0, Math.min(useN, perBulletDy.length));
+  const useAudio = shotTimes.length >= dy.length;
   const rpm = parseFloat(document.getElementById('rpmInput').value) || 600;
   const baseT = useAudio ? shotTimes[0] : 0;
 
   let cumX = 0, cumY = 0;
-  const out = perBulletDy.map((dy, i) => {
+  const out = dy.map((d, i) => {
     const t_ms = useAudio
       ? Math.round((shotTimes[i] - baseT) * 1000)
       : Math.round(i * 60000 / rpm);
     cumX += 0;
-    cumY += -Math.round(dy * calcScale);
+    cumY += -Math.round(d * calcScale);
     return `{"x":${cumX},"y":${cumY},"t":${t_ms}}`;
   });
   const json = '[' + out.join(',') + ']';
@@ -900,6 +918,36 @@ function showP3() {
   document.getElementById('p3').style.display = 'block';
   document.getElementById('p3GunName').textContent =
     document.getElementById('gunNameInput').value || '';
+}
+
+/* ═══════════════ Save to Custom Config ═══════════════ */
+function saveToCustom() {
+  const ps = window._calcParams;
+  if (!ps || !ps.length) { toast('请先计算参数'); return; }
+  const gunName = document.getElementById('gunNameInput').value.trim() || '视频分析配置';
+  const now = new Date().toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
+  const mkPhase = p => p
+    ? { time: p.time, time_max: p.time_max, delay_min: p.delay_min,
+        delay_max: p.delay_max, x_main: p.x_main, y_main: p.y_main,
+        x_alt: 0, y_alt: 0, interval: p.interval }
+    : { time: 0, time_max: 0, delay_min: 10, delay_max: 15,
+        x_main: 0, y_main: 0, x_alt: 0, y_alt: 0, interval: 100 };
+  const cfg = {
+    id:      Date.now().toString(36),
+    name:    gunName + ' 视频' + now,
+    gunName: gunName,
+    phase1:  mkPhase(ps[0]),
+    phase2:  mkPhase(ps[1] || ps[0]),
+    phase3:  mkPhase(ps[2] || ps[1] || ps[0])
+  };
+  try {
+    const list = JSON.parse(localStorage.getItem('custom_gun_configs') || '[]');
+    list.unshift(cfg);
+    localStorage.setItem('custom_gun_configs', JSON.stringify(list));
+    toast('✅ 已保存！去主工具 → 🔧 自定义配置 写入压枪器');
+  } catch (e) {
+    toast('保存失败：' + e.message);
+  }
 }
 
 /* ═══════════════ Toast ═══════════════ */
