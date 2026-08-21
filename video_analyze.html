@@ -359,6 +359,9 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
 
   <!-- 三阶段参数 -->
   <div class="params-grid" id="paramsGrid"></div>
+  <div id="calibHint" style="font-size:.75rem;color:var(--sub);background:rgba(0,194,255,.07);
+    border:1px solid rgba(0,194,255,.2);border-radius:8px;padding:10px 14px;margin-top:8px;
+    line-height:1.7;display:none"></div>
 
   <!-- 原始数据 -->
   <div class="card" style="margin-top:12px">
@@ -794,10 +797,31 @@ function renderResult() {
     };
   }).filter(Boolean);
 
+  // Compute device params for display (same logic as saveToCustom)
+  const DEVICE_INTERVAL = 10;
+  const subMoves = Math.max(1, Math.round(interval / DEVICE_INTERVAL));
+  const total    = activeDy.length;
+  const toDevY   = yPerBullet => {
+    const v = Math.round(yPerBullet / subMoves);
+    return v === 0 ? (Math.sign(yPerBullet) || 1) : v;
+  };
+  const cumTimeArr = [
+    Math.round(s1 * subMoves),
+    Math.round(Math.min(s2, total) * subMoves),
+    Math.round(total * subMoves)
+  ];
+  const devParams = params.map((p, idx) => ({
+    y_dev:    toDevY(p.y_main),
+    total_per_bullet: toDevY(p.y_main) * subMoves,
+    time:     cumTimeArr[idx],
+    interval: DEVICE_INTERVAL,
+    subMoves
+  }));
+
   renderResultCanvas(activeDy, phases, sign, s1, s2);
   renderScatterCanvas(activeDy, params, sign, s1, s2);
   renderSimCanvas(activeDy, params, sign, s1, s2);
-  renderParamsGrid(params);
+  renderParamsGrid(params, devParams, subMoves);
   document.getElementById('rawDataView').textContent =
     'dy/bullet: [' + activeDy.map(v => v.toFixed(1)).join(', ') + ']';
   window._calcParams = params;
@@ -1091,22 +1115,37 @@ function renderSimCanvas(activeDy, params, sign, s1, s2) {
   sCtx.fillText('0', 18, zeroY + 3);
 }
 
-function renderParamsGrid(params) {
+function renderParamsGrid(params, devParams, subMoves) {
   const names   = ['阶段1（前段）', '阶段2（中段）', '阶段3（后段）'];
   const colors  = ['rgba(0,208,132,.15)', 'rgba(139,92,255,.15)', 'rgba(255,71,87,.15)'];
   const borders = ['rgba(0,208,132,.3)',  'rgba(139,92,255,.3)',  'rgba(255,71,87,.3)'];
   const texts   = ['#00D084', '#8B5CFF', '#FF4757'];
-  document.getElementById('paramsGrid').innerHTML = params.map((p, i) => `
+  document.getElementById('paramsGrid').innerHTML = params.map((p, i) => {
+    const dp = devParams ? devParams[i] : null;
+    return `
     <div class="phase-box" style="background:${colors[i]};border-color:${borders[i]}">
       <h4 style="color:${texts[i]}">${names[i]}</h4>
-      ${row('弹数 time',          p.time)}
-      ${row('弹数上限 time_max',  p.time_max)}
-      ${row('延迟最小 delay_min', p.delay_min + 'ms')}
-      ${row('延迟最大 delay_max', p.delay_max + 'ms')}
-      ${row('X偏移 x_main',      p.x_main)}
-      ${row('Y偏移 y_main',      p.y_main, texts[i])}
-      ${row('间隔 interval',     p.interval + 'ms')}
-    </div>`).join('');
+      ${row('分析 y_main/发',  p.y_main + ' px')}
+      ${row('射速 interval',   p.interval + 'ms')}
+      ${dp ? `<div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,.1);font-size:.68rem;color:var(--sub)">▶ 写入设备实际值</div>` : ''}
+      ${dp ? row('y_main/次',  `<span style="color:${texts[i]};font-size:.85rem;font-weight:700">${dp.y_dev}</span>`) : ''}
+      ${dp ? row(`×${dp.subMoves}次/发`,  `<span style="color:${texts[i]}">${dp.total_per_bullet}/发</span>`) : ''}
+      ${dp ? row('time (ticks)', dp.time) : ''}
+      ${dp ? row('interval', dp.interval + 'ms') : ''}
+    </div>`;
+  }).join('');
+
+  if (devParams && devParams.length) {
+    const ym = devParams[0].y_dev;
+    const sm = devParams[0].subMoves;
+    const hint = document.getElementById('calibHint');
+    hint.style.display = 'block';
+    hint.innerHTML =
+      `<b>设备实际</b>：每次补偿 <b style="color:#00C2FF">y_main=${ym}</b>，每发触发 <b>${sm}</b> 次，共 <b>${ym*sm}/发</b>。<br>
+       若游戏中<b>仍往上飘</b> → 说明灵敏度换算比 &lt; 1:1，请<b>上调 calcScale</b>（尝试 1.5 → 2 → 3）再重新保存测试。<br>
+       若游戏中<b>往下飘</b> → 说明过补偿，<b>降低 calcScale</b>（尝试 0.7 → 0.5）。<br>
+       找到合适倍数后，该 calcScale 值对同灵敏度/同镜倍下所有枪械通用。`;
+  }
 }
 
 function row(k, v, color) {
