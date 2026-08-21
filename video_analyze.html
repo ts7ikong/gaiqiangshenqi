@@ -479,26 +479,27 @@ vid.addEventListener('seeked', drawFrame);
 
 function drawFrame() {
   ctx.drawImage(vid, 0, 0, vc.width, vc.height);
-  // draw markers
-  points.forEach((p, i) => {
-    const isLast = i === points.length - 1;
+  // Only draw the latest tracked point as a small crosshair indicator.
+  // Historical points are shown in the trajectory preview panel — no need
+  // to scatter them all over the video canvas.
+  if (points.length > 0) {
+    const p = points[points.length - 1];
+    const R = 8, L = 14;
+    ctx.save();
+    ctx.strokeStyle = '#FF3366';
+    ctx.lineWidth   = 2;
     ctx.beginPath();
-    ctx.arc(p.x, p.y, isLast ? 7 : 5, 0, Math.PI*2);
-    ctx.fillStyle = isLast ? '#FF3366' : 'rgba(0,194,255,.7)';
-    ctx.fill();
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 1.5;
+    ctx.moveTo(p.x - L, p.y); ctx.lineTo(p.x - R, p.y);
+    ctx.moveTo(p.x + R, p.y); ctx.lineTo(p.x + L, p.y);
+    ctx.moveTo(p.x, p.y - L); ctx.lineTo(p.x, p.y - R);
+    ctx.moveTo(p.x, p.y + R); ctx.lineTo(p.x, p.y + L);
     ctx.stroke();
-    // connect line
-    if (i > 0) {
-      ctx.beginPath();
-      ctx.moveTo(points[i-1].x, points[i-1].y);
-      ctx.lineTo(p.x, p.y);
-      ctx.strokeStyle = 'rgba(0,208,132,.5)';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-    }
-  });
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, R, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255,51,102,0.7)';
+    ctx.stroke();
+    ctx.restore();
+  }
   // draw ROI rectangle if set
   if (roiRect && roiRect.w > 2 && roiRect.h > 2) {
     ctx.save();
@@ -688,11 +689,12 @@ async function startAutoTrack() {
     if (trackMode === 'crosshair') {
       // Primary: color-based red crosshair detection
       const res = detectRedCrosshair(curX, curY, CROSSHAIR_SEARCH_R);
-      if (res.found) {
+      const jump = res.found ? Math.hypot(res.x - curX, res.y - curY) : Infinity;
+      if (res.found && jump <= 40) {
         foundX = res.x; foundY = res.y;
         crosshairMissCount = 0;
       } else {
-        // Fallback to template matching when red dot not found (e.g., smoke/wall covers it)
+        // Missed or jumped too far → template fallback
         crosshairMissCount++;
         const tmpl = findTemplate(curX, curY);
         foundX = tmpl.x; foundY = tmpl.y;
@@ -1086,7 +1088,8 @@ async function oneClickAnalyze() {
   isAutoTracking = true;
   document.getElementById('autoBtn').disabled = true;
 
-  const step  = 2;
+  const step     = 2;
+  const MAX_JUMP = 40; // px — larger jump = likely false detection
   let curX = res.x, curY = res.y;
   let f = trimStart + step;
   const totalF = trimEnd !== null ? trimEnd : Math.floor(duration * 60);
@@ -1096,11 +1099,11 @@ async function oneClickAnalyze() {
     await seekFrame(f);
     const det = detectRedCrosshair(curX, curY, CROSSHAIR_SEARCH_R);
     let fx = curX, fy = curY;
-    if (det.found) {
+    if (det.found && Math.hypot(det.x - curX, det.y - curY) <= MAX_JUMP) {
       fx = det.x; fy = det.y; missCount = 0;
     } else {
+      // Missed or jumped too far → template fallback
       missCount++;
-      // After 5 consecutive misses, try template matching as fallback
       const tmpl = findTemplate(curX, curY);
       fx = tmpl.x; fy = tmpl.y;
     }
