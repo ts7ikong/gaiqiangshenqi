@@ -1248,8 +1248,9 @@ function saveToCustom() {
   const DEVICE_INTERVAL = 10;
   const MIN_GUN_PERIOD  = 40;   // 最快约1500RPM
   const rawPeriod = ps[0] ? ps[0].interval : 100;
-  const rpmPeriod = Math.round(60000 / (parseFloat(document.getElementById('rpmInput').value) || 600));
-  // 若存储的 interval < 40ms（音频误检），回退到RPM输入值
+  const rpmVal    = parseFloat(document.getElementById('rpmInput').value) || 600;
+  const rpmPeriod = Math.max(MIN_GUN_PERIOD, Math.round(60000 / rpmVal));
+  // rawPeriod可能因音频误检而 < 40ms，以 RPM 输入为准（更可靠）
   const gunPeriod = rawPeriod >= MIN_GUN_PERIOD ? rawPeriod : rpmPeriod;
   const subMoves  = Math.max(1, Math.round(gunPeriod / DEVICE_INTERVAL));  // ticks per bullet
 
@@ -1300,7 +1301,8 @@ function saveToCustom() {
     localStorage.setItem('custom_gun_configs', JSON.stringify(list));
     const iv  = cfg.phase1.interval;
     const ym1 = cfg.phase1.y_main;
-    toast(`✅ 已保存！interval=${iv}ms × ${subMoves}次/发 y_main=${ym1}×${subMoves}=${ym1*subMoves}/发 → 主工具→🔧自定义配置→写入`);
+    const t3  = cfg.phase3.time;
+    toast(`✅ 已保存！gunPeriod=${gunPeriod}ms subMoves=${subMoves} time3=${t3}(${Math.round(t3*iv/gunPeriod)}发) y_main=${ym1}/次 → 主工具→写入`);
   } catch (e) {
     toast('保存失败：' + e.message);
   }
