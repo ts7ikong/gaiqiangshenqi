@@ -1148,14 +1148,15 @@ function renderParamsGrid(params, devParams, subMoves, interval, intervalSrc) {
     const hint = document.getElementById('calibHint');
     hint.style.display = 'block';
     const srcWarn = intervalSrc && intervalSrc.includes('回退')
-      ? `<br>⚠️ <b style="color:#FFB347">音频检测到异常短间隔，已自动回退到 RPM 输入值（${interval}ms）</b>——若压枪发数还不对请检查 RPM 输入是否正确。`
+      ? `<br>⚠️ <b style="color:#FFB347">音频误检，已回退到 RPM（${interval}ms）</b>——若发数不对请确认 RPM 框数值正确。`
       : '';
+    // Show time for all 3 phases
+    const phTimes = devParams.map((d, i) => `P${i+1}:${d.time}`).join(' / ');
     hint.innerHTML =
-      `<b>射速</b>：${interval}ms/发（来源：${intervalSrc || 'RPM'}），每发 ${sm} 次补偿事件${srcWarn}<br>
-       <b>设备实际</b>：每次补偿 <b style="color:#00C2FF">y_main=${ym}</b>，共 <b>${ym*sm}/发</b>。<br>
-       若游戏中<b>仍往上飘</b> → <b>上调 calcScale</b>（1.5 → 2 → 3）再重新保存测试。<br>
-       若游戏中<b>往下飘</b> → <b>降低 calcScale</b>（0.7 → 0.5）。<br>
-       找到合适倍数后，该 calcScale 对同灵敏度/同镜倍所有枪通用。`;
+      `<b>🔢 写入设备参数</b>：射速 <b>${interval}ms</b>/发（${intervalSrc || 'RPM'}），subMoves=<b style="color:#00C2FF">${sm}</b>次/发${srcWarn}<br>
+       time(ticks)：<b style="color:#FFD700">${phTimes}</b>，phase3 覆盖约 <b>${Math.round(devParams[2] ? devParams[2].time * 10 / interval : 0)}发</b><br>
+       y_main：<b style="color:#00C2FF">${ym}</b>/次 × ${sm}次 = <b>${ym*sm}</b>/发<br>
+       <span style="color:rgba(255,255,255,.5)">若仍往上飘 → 上调 calcScale（1.5→2→3）；往下飘 → 降低（0.7→0.5）。找到后对同灵敏度所有枪通用。</span>`;
   }
 }
 
@@ -1313,7 +1314,7 @@ function toast(msg) {
   const el = document.getElementById('toast');
   el.textContent = msg;
   el.classList.add('show');
-  setTimeout(() => el.classList.remove('show'), 2800);
+  setTimeout(() => el.classList.remove('show'), 5000);
 }
 </script>
 </body>
