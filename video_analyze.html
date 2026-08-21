@@ -1197,7 +1197,7 @@ function saveToCustom() {
   // 固定 interval=16ms（与 S-curve 参考一致）。
   // 每发子弹内设备补偿次数 = floor(gun_period / 16)，因此
   // 每次补偿的 y_main_device = y_main_per_bullet / subMoves
-  const DEVICE_INTERVAL = 16;
+  const DEVICE_INTERVAL = 10;  // 参考配置 interval=10，y_main=2×9次/发≈per-bullet
   const gunPeriod = ps[0] ? ps[0].interval : 100;   // gun fire period in ms (stored in params.interval)
   const subMoves  = Math.max(1, Math.round(gunPeriod / DEVICE_INTERVAL));
 
