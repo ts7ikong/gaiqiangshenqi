@@ -1155,7 +1155,7 @@ function renderParamsGrid(params, devParams, subMoves, interval, intervalSrc) {
     const phTimes = devParams.map((d, i) => `P${i+1}:${d.time}`).join(' / ');
     hint.innerHTML =
       `<b>🔢 写入设备参数</b>：射速 <b>${interval}ms</b>/发（${intervalSrc || 'RPM'}），subMoves=<b style="color:#00C2FF">${sm}</b>次/发${srcWarn}<br>
-       time(ticks)：<b style="color:#FFD700">${phTimes}</b>，phase3 覆盖约 <b>${Math.round(devParams[2] ? devParams[2].time * 10 / interval : 0)}发</b><br>
+       time(ticks)：<b style="color:#FFD700">${phTimes}</b>，phase3 覆盖约 <b>${devParams[2] ? Math.round(devParams[2].time / sm) : 0}发</b><br>
        y_main：<b style="color:#00C2FF">${ym}</b>/次 × ${sm}次 = <b>${ym*sm}</b>/发<br>
        <span style="color:rgba(255,255,255,.5)">若仍往上飘 → 上调 calcScale（1.5→2→3）；往下飘 → 降低（0.7→0.5）。找到后对同灵敏度所有枪通用。</span>`;
   }
@@ -1305,7 +1305,7 @@ function saveToCustom() {
     const iv  = cfg.phase1.interval;
     const ym1 = cfg.phase1.y_main;
     const t3  = cfg.phase3.time;
-    toast(`✅ 已保存！gunPeriod=${gunPeriod}ms subMoves=${subMoves} time3=${t3}(${Math.round(t3*iv/gunPeriod)}发) y_main=${ym1}/次 → 主工具→写入`);
+    toast(`✅ 已保存！gunPeriod=${gunPeriod}ms subMoves=${subMoves} time3=${t3}(${Math.round(t3/subMoves)}发) y_main=${ym1}/次 → 主工具→写入`);
   } catch (e) {
     toast('保存失败：' + e.message);
   }
