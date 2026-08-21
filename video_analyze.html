@@ -812,10 +812,11 @@ function renderResult() {
     const v = Math.round(yPerBullet / subMoves);
     return v === 0 ? (Math.sign(yPerBullet) || 1) : v;
   };
+  const useN_disp = parseInt(document.getElementById('useBullets').value) || perBulletDy.length;
   const cumTimeArr = [
     Math.round(s1 * subMoves),
-    Math.round(Math.min(s2, total) * subMoves),
-    Math.round(total * subMoves)
+    Math.round(Math.min(s2, useN_disp) * subMoves),
+    Math.round(useN_disp * subMoves)
   ];
   const devParams = params.map((p, idx) => ({
     y_dev:    toDevY(p.y_main),
@@ -1256,10 +1257,11 @@ function saveToCustom() {
   const subMoves  = Math.max(1, Math.round(gunPeriod / DEVICE_INTERVAL));  // ticks per bullet
 
   // cumTime in TICKS (not bullets)
+  // phase3 用 useN（用户填的发数），不受追踪帧数限制，末段参数可外推
   const cumTime = [
-    Math.round(s1                      * subMoves),
-    Math.round(Math.min(s2, total)     * subMoves),
-    Math.round(total                   * subMoves)
+    Math.round(s1               * subMoves),
+    Math.round(Math.min(s2, useN) * subMoves),
+    Math.round(useN             * subMoves)
   ];
 
   const toDeviceYmain = yPerBullet => {
