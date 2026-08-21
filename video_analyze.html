@@ -112,7 +112,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
   border-radius:3px;transition:width .1s;width:0}
 .prog-label{font-size:.75rem;color:var(--sub);margin-top:4px}
 
-@media(max-width:700px){.ana-layout{grid-template-columns:1fr}.params-grid{grid-template-columns:1fr}}
+@media(max-width:700px){.ana-layout{grid-template-columns:1fr}.params-grid{grid-template-columns:1fr}#vizRow{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -323,6 +323,37 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
       <span><span style="color:var(--green)">●</span> 阶段1</span>
       <span><span style="color:#8B5CFF">●</span> 阶段2</span>
       <span><span style="color:#FF4757">●</span> 阶段3</span>
+    </div>
+  </div>
+
+  <!-- 弹道散布 + 压枪模拟 -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px" id="vizRow">
+
+    <!-- 弹道散布图 -->
+    <div class="card">
+      <div style="font-size:.82rem;font-weight:700;color:var(--accent);margin-bottom:8px">
+        🎯 弹道散布图
+        <span style="font-weight:400;color:var(--sub);font-size:.72rem">每发子弹垂直落点</span>
+      </div>
+      <canvas id="scatterCanvas" style="width:100%;height:240px;display:block;border-radius:8px;background:#080a14"></canvas>
+      <div style="display:flex;gap:14px;margin-top:6px;font-size:.72rem;color:var(--sub);flex-wrap:wrap">
+        <span><span style="color:#FF3366">●</span> 原始落点（无压枪）</span>
+        <span><span style="color:#00D084">●</span> 压枪后落点</span>
+      </div>
+    </div>
+
+    <!-- 压枪模拟曲线 -->
+    <div class="card">
+      <div style="font-size:.82rem;font-weight:700;color:var(--green);margin-bottom:8px">
+        📈 压枪模拟曲线
+        <span style="font-weight:400;color:var(--sub);font-size:.72rem">按参数模拟设备输出</span>
+      </div>
+      <canvas id="simCanvas" style="width:100%;height:240px;display:block;border-radius:8px;background:#080a14"></canvas>
+      <div style="display:flex;gap:14px;margin-top:6px;font-size:.72rem;color:var(--sub);flex-wrap:wrap">
+        <span><span style="color:rgba(255,51,102,.85)">- -</span> 后座力</span>
+        <span><span style="color:rgba(0,194,255,.9)">─</span> 压枪补偿</span>
+        <span><span style="color:rgba(255,255,255,.9)">─</span> 剩余偏移</span>
+      </div>
     </div>
   </div>
 
@@ -764,6 +795,8 @@ function renderResult() {
   }).filter(Boolean);
 
   renderResultCanvas(activeDy, phases, sign, s1, s2);
+  renderScatterCanvas(activeDy, sign, s1, s2);
+  renderSimCanvas(activeDy, params, sign, s1, s2);
   renderParamsGrid(params);
   document.getElementById('rawDataView').textContent =
     'dy/bullet: [' + activeDy.map(v => v.toFixed(1)).join(', ') + ']';
@@ -831,6 +864,234 @@ function renderResultCanvas(all, phases, sign, s1, s2) {
     resCtx.stroke();
     resCtx.setLineDash([]);
   });
+}
+
+/* ── 弹道散布图 ── */
+function renderScatterCanvas(activeDy, sign, s1, s2) {
+  const sc   = document.getElementById('scatterCanvas');
+  sc.width   = sc.offsetWidth || 420;
+  sc.height  = 240;
+  const sCtx = sc.getContext('2d');
+  const cw = sc.width, ch = sc.height;
+  sCtx.clearRect(0, 0, cw, ch);
+
+  const n = activeDy.length;
+  if (!n) return;
+
+  // Cumulative recoil in device units (positive = gun kicks up = crosshair drifts up)
+  let cumY = 0;
+  const cumRecoil = activeDy.map(d => { cumY += d * sign * calcScale; return cumY; });
+
+  // Cumulative compensation per bullet using computed params
+  const ps = window._calcParams;
+  let compAcc = 0;
+  const cumComp = activeDy.map((_, i) => {
+    let p = i < s1 ? ps[0] : i < s2 ? (ps[1] || ps[0]) : (ps[2] || ps[1] || ps[0]);
+    if (p) compAcc += p.y_main;
+    return compAcc;
+  });
+
+  // Net residual after compensation
+  const cumNet = cumRecoil.map((r, i) => r - cumComp[i]);
+
+  // Layout: aim point at bottom-center; recoil goes UP (smaller py)
+  const padL = 30, padR = 12, padT = 10, padB = 22;
+  const cx   = Math.floor((cw - padL - padR) / 2) + padL;
+  const aimY = ch - padB;  // aim point at bottom
+  const maxRecoil = Math.max(1, ...cumRecoil.map(Math.abs));
+  const scaleV = (ch - padT - padB) / maxRecoil;
+
+  const toScreenY = v => aimY - v * scaleV;  // positive v → moves up on canvas (smaller py)
+  const dotX = cx;
+
+  // Background phase bands (vertical strips by bullet index mapped to Y)
+  const phaseRanges = [[0, s1], [s1, Math.min(s2, n)], [Math.min(s2, n), n]];
+  const phaseBg = ['rgba(0,208,132,.06)', 'rgba(139,92,255,.06)', 'rgba(255,71,87,.06)'];
+  phaseRanges.forEach(([a, b], pi) => {
+    if (a >= b) return;
+    const y1 = toScreenY(cumRecoil[b - 1] || 0);
+    const y2 = (pi === 0) ? aimY : toScreenY(cumRecoil[a - 1] || 0);
+    sCtx.fillStyle = phaseBg[pi];
+    sCtx.fillRect(padL, Math.min(y1, y2) - 4, cw - padL - padR, Math.abs(y2 - y1) + 8);
+  });
+
+  // Concentric rings at 25%, 50%, 75%, 100% of max recoil
+  [0.25, 0.5, 0.75, 1.0].forEach(r => {
+    const ry = r * maxRecoil * scaleV;
+    sCtx.strokeStyle = r === 1.0 ? 'rgba(255,255,255,.12)' : 'rgba(255,255,255,.07)';
+    sCtx.lineWidth = 1;
+    sCtx.setLineDash(r === 1.0 ? [] : [3, 4]);
+    sCtx.beginPath(); sCtx.arc(cx, aimY, ry, 0, Math.PI * 2); sCtx.stroke();
+    sCtx.setLineDash([]);
+    if (r < 1.0) {
+      sCtx.fillStyle = 'rgba(255,255,255,.2)';
+      sCtx.font = '8px monospace';
+      sCtx.fillText(Math.round(r * maxRecoil), cx + ry + 2, aimY - 2);
+    }
+  });
+
+  // Aim crosshair
+  sCtx.strokeStyle = 'rgba(255,255,255,.35)';
+  sCtx.lineWidth = 1;
+  sCtx.beginPath();
+  sCtx.moveTo(cx - 10, aimY); sCtx.lineTo(cx + 10, aimY);
+  sCtx.moveTo(cx, aimY - 10); sCtx.lineTo(cx, aimY + 10);
+  sCtx.stroke();
+  sCtx.fillStyle = 'rgba(255,255,255,.3)'; sCtx.font = '8px monospace';
+  sCtx.fillText('瞄准点', cx + 5, aimY - 4);
+
+  // Draw raw recoil path
+  sCtx.strokeStyle = 'rgba(255,51,102,.5)';
+  sCtx.lineWidth = 1.5; sCtx.setLineDash([3, 3]);
+  sCtx.beginPath();
+  sCtx.moveTo(dotX - 8, aimY);
+  cumRecoil.forEach(v => sCtx.lineTo(dotX - 8, toScreenY(v)));
+  sCtx.stroke(); sCtx.setLineDash([]);
+
+  // Draw net path
+  sCtx.strokeStyle = 'rgba(0,208,132,.8)';
+  sCtx.lineWidth = 2;
+  sCtx.beginPath();
+  sCtx.moveTo(dotX + 8, aimY);
+  cumNet.forEach(v => sCtx.lineTo(dotX + 8, toScreenY(v)));
+  sCtx.stroke();
+
+  // Dots + labels every 5th bullet
+  const phaseColor = i => i < s1 ? '#FF3366' : i < s2 ? '#AA44FF' : '#FF6633';
+  cumRecoil.forEach((v, i) => {
+    const py = toScreenY(v);
+    // Small dot for raw recoil
+    sCtx.fillStyle = phaseColor(i) + (i === n - 1 ? 'FF' : '88');
+    sCtx.beginPath(); sCtx.arc(dotX - 8, py, i === n - 1 ? 4 : 2.5, 0, Math.PI * 2); sCtx.fill();
+    if (i % 5 === 0 || i === n - 1) {
+      sCtx.fillStyle = 'rgba(255,255,255,.35)'; sCtx.font = '8px monospace';
+      sCtx.fillText(i + 1, padL - 26, py + 3);
+    }
+  });
+  cumNet.forEach((v, i) => {
+    const py = toScreenY(v);
+    sCtx.fillStyle = '#00D084' + (i === n - 1 ? 'FF' : '99');
+    sCtx.beginPath(); sCtx.arc(dotX + 8, py, i === n - 1 ? 4 : 2.5, 0, Math.PI * 2); sCtx.fill();
+  });
+
+  // Y-axis label
+  sCtx.fillStyle = 'rgba(255,255,255,.2)'; sCtx.font = '8px monospace';
+  sCtx.save(); sCtx.translate(8, (aimY + padT) / 2);
+  sCtx.rotate(-Math.PI / 2); sCtx.fillText('后座力 ↑', -18, 0);
+  sCtx.restore();
+}
+
+/* ── 压枪模拟曲线 ── */
+function renderSimCanvas(activeDy, params, sign, s1, s2) {
+  const sc   = document.getElementById('simCanvas');
+  sc.width   = sc.offsetWidth || 420;
+  sc.height  = 240;
+  const sCtx = sc.getContext('2d');
+  const cw = sc.width, ch = sc.height;
+  sCtx.clearRect(0, 0, cw, ch);
+
+  const n = activeDy.length;
+  if (!n || !params.length) return;
+
+  // Cumulative recoil in device units
+  let cumY = 0;
+  const cumRecoil = activeDy.map(d => { cumY += d * sign * calcScale; return cumY; });
+
+  // Cumulative compensation (device y_main per bullet)
+  const ps = params;
+  let compAcc = 0;
+  const cumComp = activeDy.map((_, i) => {
+    let p = i < s1 ? ps[0] : i < s2 ? (ps[1] || ps[0]) : (ps[2] || ps[1] || ps[0]);
+    if (p) compAcc += p.y_main;
+    return compAcc;
+  });
+
+  // Net = recoil - compensation (ideal = 0)
+  const cumNet = cumRecoil.map((r, i) => r - cumComp[i]);
+
+  // Layout
+  const padL = 36, padR = 12, padT = 14, padB = 22;
+  const plotW = cw - padL - padR;
+  const plotH = ch - padT - padB;
+
+  const allVals = [...cumRecoil, ...cumComp, ...cumNet];
+  const maxV = Math.max(1, ...allVals.map(Math.abs));
+  const minV = Math.min(0, ...allVals);
+
+  const toX = i => padL + (i / Math.max(n - 1, 1)) * plotW;
+  const toY = v => padT + plotH - ((v - minV) / (maxV - minV + 0.01)) * plotH;
+  const zeroY = toY(0);
+
+  // Phase background bands
+  const phaseBg = ['rgba(0,208,132,.06)', 'rgba(139,92,255,.06)', 'rgba(255,71,87,.06)'];
+  [[0, s1], [s1, s2], [s2, n]].forEach(([a, b], pi) => {
+    const clampA = Math.min(a, n), clampB = Math.min(b, n);
+    if (clampA >= clampB) return;
+    sCtx.fillStyle = phaseBg[pi];
+    sCtx.fillRect(toX(clampA), padT, toX(clampB) - toX(clampA), plotH);
+  });
+
+  // Grid: zero line
+  sCtx.strokeStyle = 'rgba(255,255,255,.15)'; sCtx.lineWidth = 1;
+  sCtx.beginPath(); sCtx.moveTo(padL, zeroY); sCtx.lineTo(cw - padR, zeroY); sCtx.stroke();
+
+  // Phase dividers
+  [s1, s2].forEach((sp, pi) => {
+    if (sp <= 0 || sp >= n) return;
+    sCtx.strokeStyle = pi === 0 ? 'rgba(0,208,132,.4)' : 'rgba(139,92,255,.4)';
+    sCtx.lineWidth = 1; sCtx.setLineDash([4, 4]);
+    sCtx.beginPath(); sCtx.moveTo(toX(sp), padT); sCtx.lineTo(toX(sp), padT + plotH); sCtx.stroke();
+    sCtx.setLineDash([]);
+    sCtx.fillStyle = pi === 0 ? 'rgba(0,208,132,.6)' : 'rgba(139,92,255,.6)';
+    sCtx.font = '8px monospace';
+    sCtx.fillText(`P${pi + 2}`, toX(sp) + 2, padT + 10);
+  });
+
+  // Draw line helper
+  const drawLine = (data, color, dash, width) => {
+    sCtx.strokeStyle = color; sCtx.lineWidth = width;
+    if (dash) sCtx.setLineDash(dash); else sCtx.setLineDash([]);
+    sCtx.beginPath();
+    data.forEach((v, i) => {
+      const px = toX(i), py = toY(v);
+      i === 0 ? sCtx.moveTo(px, py) : sCtx.lineTo(px, py);
+    });
+    sCtx.stroke(); sCtx.setLineDash([]);
+  };
+
+  drawLine(cumRecoil, 'rgba(255,51,102,.7)',   [5, 4],  1.5);  // 后座力 (red dashed)
+  drawLine(cumComp,   'rgba(0,194,255,.85)',    null,    2);    // 压枪补偿 (blue solid)
+  drawLine(cumNet,    'rgba(255,255,255,.85)',  null,    1.5);  // 剩余偏移 (white)
+
+  // Endpoint labels
+  const labelEnd = (data, color, label) => {
+    const v = data[data.length - 1];
+    const px = toX(n - 1) + 3, py = toY(v);
+    sCtx.fillStyle = color; sCtx.font = 'bold 9px monospace';
+    sCtx.fillText(`${label}:${Math.round(v)}`, px, py + 3);
+  };
+  labelEnd(cumRecoil, 'rgba(255,51,102,.9)',  '后座');
+  labelEnd(cumComp,   'rgba(0,194,255,.9)',   '补偿');
+  labelEnd(cumNet,    'rgba(255,255,255,.75)','剩余');
+
+  // Y-axis ticks
+  sCtx.fillStyle = 'rgba(255,255,255,.25)'; sCtx.font = '8px monospace';
+  [0, Math.round(maxV * 0.5), Math.round(maxV)].forEach(tick => {
+    const py = toY(tick);
+    if (py < padT || py > padT + plotH) return;
+    sCtx.fillText(tick, 2, py + 3);
+    sCtx.strokeStyle = 'rgba(255,255,255,.05)'; sCtx.lineWidth = 1;
+    sCtx.beginPath(); sCtx.moveTo(padL, py); sCtx.lineTo(cw - padR, py); sCtx.stroke();
+  });
+
+  // X-axis label
+  sCtx.fillStyle = 'rgba(255,255,255,.25)'; sCtx.font = '8px monospace';
+  sCtx.fillText(`第1发`, toX(0), padT + plotH + 14);
+  sCtx.fillText(`第${n}发`, toX(n - 1) - 20, padT + plotH + 14);
+
+  // Zero label
+  sCtx.fillStyle = 'rgba(255,255,255,.2)'; sCtx.font = '8px monospace';
+  sCtx.fillText('0', 18, zeroY + 3);
 }
 
 function renderParamsGrid(params) {
