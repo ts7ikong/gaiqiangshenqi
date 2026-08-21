@@ -165,7 +165,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
       2. <strong>完全不动鼠标</strong>，直接开枪打完一梭子<br>
       3. 视角不需要正对墙壁，任意角度均可<br>
       4. 拖入视频，点「<strong style="color:#00C2FF">🚀 一键智能分析</strong>」即可<br><br>
-      工具自动识别<strong style="color:#FF3366">红色准星点</strong>并逐帧追踪，直接输出后座力曲线。
+      工具自动识别<strong style="color:#FF3366">红色准星点</strong>定位起始位置，再追踪该位置的<strong style="color:#00C2FF">墙壁纹理</strong>随摄像机后座移动，输出后座力曲线。
     </div>
   </div>
   <div id="loadingTip" style="color:var(--accent2);font-size:.88rem;margin-top:20px;display:none">⏳ 正在解析视频...</div>
@@ -1076,44 +1076,47 @@ async function oneClickAnalyze() {
     }
   }
 
-  status.innerHTML = `✅ 准星锁定 (${res.x.toFixed(0)}, ${res.y.toFixed(0)}) · 开始逐帧追踪...`;
+  status.innerHTML = `✅ 准星定位 (${res.x.toFixed(0)}, ${res.y.toFixed(0)}) · 追踪墙壁纹理位移...`;
 
   // Step 3: record the first point
   clearPoints();
   addPoint(res.x, res.y, vid.currentTime, trimStart);
   captureTemplate(res.x, res.y);
 
-  // Step 4: auto-track frames within trim range
+  // Step 4: track wall features through all frames via template matching.
+  // The crosshair (HUD overlay) stays at ~screen-center regardless of recoil;
+  // it's the WALL TEXTURE that moves down in the frame as the camera recoils up.
+  // Template matching on the wall patch around the aim point gives the real recoil.
   document.getElementById('progressBar').style.display = 'block';
   isAutoTracking = true;
   document.getElementById('autoBtn').disabled = true;
 
-  const step     = 2;
-  const MAX_JUMP = 40; // px — larger jump = likely false detection
+  const step  = 2;
   let curX = res.x, curY = res.y;
   let f = trimStart + step;
   const totalF = trimEnd !== null ? trimEnd : Math.floor(duration * 60);
-  let missCount = 0;
+  let templateAge = 0; // frames since last template refresh
 
   while (f <= totalF) {
     await seekFrame(f);
-    const det = detectRedCrosshair(curX, curY, CROSSHAIR_SEARCH_R);
-    let fx = curX, fy = curY;
-    if (det.found && Math.hypot(det.x - curX, det.y - curY) <= MAX_JUMP) {
-      fx = det.x; fy = det.y; missCount = 0;
-    } else {
-      // Missed or jumped too far → template fallback
-      missCount++;
-      const tmpl = findTemplate(curX, curY);
-      fx = tmpl.x; fy = tmpl.y;
+
+    // Track wall features (not crosshair) so camera movement = recoil is captured
+    const tmpl = findTemplate(curX, curY);
+    curX = tmpl.x; curY = tmpl.y;
+
+    // Refresh template periodically to handle bullet holes accumulating on wall
+    templateAge++;
+    if (templateAge >= 10) {
+      captureTemplate(curX, curY);
+      templateAge = 0;
     }
-    addPoint(fx, fy, vid.currentTime, f);
-    curX = fx; curY = fy;
+
+    addPoint(curX, curY, vid.currentTime, f);
 
     const pct = ((f - trimStart) / Math.max(1, totalF - trimStart) * 100).toFixed(0);
     document.getElementById('progInner').style.width = pct + '%';
     document.getElementById('progLabel').textContent =
-      `追踪中 ${pct}%  帧${f}  Δy=${(fy - points[0].y).toFixed(1)}px`;
+      `追踪中 ${pct}%  帧${f}  Δy=${(curY - points[0].y).toFixed(1)}px`;
     f += step;
     await new Promise(r => setTimeout(r, 0));
   }
