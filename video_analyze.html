@@ -162,10 +162,14 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
     <div class="tip-box">
       <strong>录制步骤：</strong><br>
       1. 进入训练场，站在墙前（离近一点，弹孔看得清）<br>
-      2. 用 OBS / Shadowplay 录屏（60fps）<br>
+      2. 用 OBS / Shadowplay 录屏（60fps，分辨率与游戏一致）<br>
       3. <strong>完全不动鼠标</strong>，直接开枪打完一梭子<br>
       4. 把录好的视频拖入上方<br><br>
-      <strong>追踪原理：</strong>选墙上一个特征点，工具追踪它的<strong>下移距离</strong> = 摄像机上移量 = 后座力，取反即为压枪补偿量
+      <strong>推荐：准星追踪模式</strong>（第2步切换）<br>
+      工具识别<strong style="color:#FF3366">红色准星点</strong>的移动轨迹 = 后座力，无需盯墙，<strong>视角俯仰不影响精度</strong>。<br><br>
+      <strong>备选：墙壁追踪模式</strong><br>
+      选墙上一个特征点，追踪其<strong>下移距离</strong> = 摄像机上移 = 后座力。<strong>建议正对墙壁录制</strong>（俯视角会引入透视误差）。<br><br>
+      <strong>关于子弹时间轴：</strong>工具用射速(RPM)插值计算每发子弹时间点，近似误差约 ±1帧，正确填写射速即可保证精度。
     </div>
   </div>
   <div id="loadingTip" style="color:var(--accent2);font-size:.88rem;margin-top:20px;display:none">⏳ 正在解析视频...</div>
@@ -199,7 +203,11 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
 
       <!-- 操作按钮 -->
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
-        <button class="btn btn-sm btn-blue" onclick="startAutoTrack()" id="autoBtn">⚡ 自动追踪（标记第1帧后点）</button>
+        <button class="btn btn-sm" id="modeBtn" onclick="toggleTrackMode()"
+          style="background:rgba(255,51,102,.12);color:var(--accent);border-color:rgba(255,51,102,.3)">
+          🔴 切换为准星追踪
+        </button>
+        <button class="btn btn-sm btn-blue" onclick="startAutoTrack()" id="autoBtn">⚡ 自动追踪</button>
         <button class="btn btn-sm" onclick="undoPoint()">↩ 撤销</button>
         <button class="btn btn-sm" onclick="clearPoints()" style="color:#FF4757;border-color:rgba(255,71,87,.3)">🗑 清空</button>
         <button class="btn btn-sm btn-primary" onclick="goToPhase3()" id="calcBtn" style="margin-left:auto">
@@ -207,12 +215,11 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
         </button>
       </div>
 
-      <div style="margin-top:10px;padding:10px 14px;border-radius:8px;background:rgba(0,194,255,.06);
+      <div id="modeHint" style="margin-top:10px;padding:10px 14px;border-radius:8px;background:rgba(0,194,255,.06);
           border:1px solid rgba(0,194,255,.2);font-size:.8rem;color:var(--sub);line-height:1.6">
-        💡 <strong style="color:var(--accent2)">操作说明：</strong>
-        在墙上找一个明显特征（弹坑、污点、裂缝）。
-        <strong style="color:#fff">第1帧</strong>点击标记它的位置，逐帧前进后<strong style="color:#fff">每次都点击同一个点</strong>。
-        也可点「自动追踪」让工具自动处理。
+        💡 <strong style="color:var(--accent2)">当前：墙壁模式</strong> —
+        在墙上找明显特征（弹坑/污点），<strong style="color:#fff">第1帧</strong>点击标记，逐帧后点同一点，或「自动追踪」。
+        <strong style="color:var(--yellow)">⚠ 如果视角有俯仰角，强烈建议切换为「准星追踪」模式（左上按钮），更准确且无透视误差。</strong>
       </div>
     </div>
 
@@ -260,6 +267,50 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
           💡 不知道射速可先保持默认，后续可调整
         </div>
       </div>
+
+      <!-- 游戏校准参数 -->
+      <div class="card">
+        <div class="panel-title"><span>🎮 游戏校准参数</span></div>
+        <div class="param-row">
+          <span class="param-key">屏幕分辨率</span>
+          <div style="display:flex;gap:3px;align-items:center">
+            <input type="number" id="screenW" value="1920" min="800" max="7680"
+              style="width:50px;text-align:center;padding:4px 2px">
+            <span style="color:var(--sub)">×</span>
+            <input type="number" id="screenH" value="1080" min="600" max="4320"
+              style="width:50px;text-align:center;padding:4px 2px">
+          </div>
+        </div>
+        <div class="param-row" style="margin-top:6px">
+          <span class="param-key">水平FOV (°)</span>
+          <input type="number" id="hFovInput" value="90" min="40" max="150"
+            style="width:62px;text-align:center">
+        </div>
+        <div class="param-row" style="margin-top:6px">
+          <span class="param-key">游戏灵敏度</span>
+          <input type="number" id="sensInput" value="1.0" step="0.05" min="0.01" max="100"
+            style="width:62px;text-align:center">
+        </div>
+        <div class="param-row" style="margin-top:6px">
+          <span class="param-key">鼠标DPI</span>
+          <input type="number" id="dpiInput" value="800" step="100" min="100" max="25600"
+            style="width:72px;text-align:center">
+        </div>
+        <div class="param-row" style="margin-top:6px">
+          <span class="param-key" title="鼠标往下拉，视角向下偏转的角度（°）">俯视角 (°)</span>
+          <input type="number" id="camAngleInput" value="0" min="0" max="89" step="1"
+            style="width:62px;text-align:center" oninput="updateAngleHint()">
+        </div>
+        <div id="angleHint" style="font-size:.7rem;color:var(--sub);margin-top:3px;display:none">
+          ⚠ 有俯视角时推荐准星追踪模式
+        </div>
+        <button class="btn btn-sm btn-blue" style="width:100%;margin-top:10px" onclick="applyAutoScale()">
+          ⚡ 自动计算基准缩放
+        </button>
+        <div style="font-size:.69rem;color:var(--sub);margin-top:5px;line-height:1.5">
+          根据分辨率 + 俯视角自动计算基准缩放，灵敏度/DPI 在第3步滑杆微调
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -278,14 +329,17 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
 
   <!-- 缩放校准 -->
   <div class="scale-row">
-    <span style="font-size:.82rem;color:var(--yellow);white-space:nowrap">⚙️ 灵敏度校准</span>
+    <span style="font-size:.82rem;color:var(--yellow);white-space:nowrap">⚙️ 输出缩放</span>
     <input type="range" id="scaleSlider" min="0.1" max="5" step="0.05" value="1"
       oninput="onScaleChange(this.value)">
     <span id="scaleVal" style="font-family:monospace;color:var(--yellow);min-width:40px">1.00×</span>
     <label style="display:flex;align-items:center;gap:5px;font-size:.78rem;color:var(--sub);cursor:pointer;white-space:nowrap">
       <input type="checkbox" id="flipY" onchange="renderResult()" style="accent-color:var(--accent)"> Y翻转
     </label>
-    <div style="font-size:.72rem;color:var(--sub)">调整至实际压枪效果匹配</div>
+    <div style="font-size:.7rem;color:var(--sub);line-height:1.4">
+      在第2步「自动计算基准缩放」后，此处微调至实际压枪效果匹配
+      <br>（灵敏度↑ → 缩放↓；DPI↑ → 缩放↓）
+    </div>
   </div>
 
   <!-- 阶段分界 -->
@@ -353,6 +407,10 @@ let templateCX = 0, templateCY = 0;
 let isAutoTracking = false;
 const TMPL_HALF = 18;      // template half-size (36x36 patch)
 const SEARCH_R  = 200;     // search radius px (at original res)
+
+// Tracking mode: 'wall' = track wall feature (original), 'crosshair' = track red dot
+let trackMode = 'wall';
+const CROSSHAIR_SEARCH_R = 80; // search radius for red crosshair detection (px)
 
 /* ═══════════════ Step 1: Load ═══════════════ */
 const uploadZone = document.getElementById('uploadZone');
@@ -472,11 +530,19 @@ vc.addEventListener('click', e => {
   const rect = vc.getBoundingClientRect();
   const scaleX = vc.width  / rect.width;
   const scaleY = vc.height / rect.height;
-  const x = (e.clientX - rect.left) * scaleX;
-  const y = (e.clientY - rect.top)  * scaleY;
+  let x = (e.clientX - rect.left) * scaleX;
+  let y = (e.clientY - rect.top)  * scaleY;
+
+  if (trackMode === 'crosshair') {
+    // Snap to the nearest red pixel cluster around click point
+    const res = detectRedCrosshair(x, y, CROSSHAIR_SEARCH_R);
+    if (res.found) { x = res.x; y = res.y; toast('已锁定红色准星 (' + x.toFixed(0) + ',' + y.toFixed(0) + ')'); }
+    else { toast('未检测到红色准星，已使用点击位置'); }
+    if (points.length === 0) captureTemplate(x, y); // keep template as fallback
+  } else {
+    if (points.length === 0) captureTemplate(x, y);
+  }
   addPoint(x, y, vid.currentTime, currentFrame);
-  // capture template from first point
-  if (points.length === 1) captureTemplate(x, y);
 });
 
 function addPoint(x, y, t, f) {
@@ -534,33 +600,56 @@ function removePoint(i) {
 
 /* ═══════════════ Auto tracking ═══════════════ */
 async function startAutoTrack() {
-  if (!templateData) { toast('请先在第1帧点击标记一个参考点'); return; }
+  if (trackMode === 'crosshair') {
+    if (!points.length) { toast('请先在第1帧点击准星位置'); return; }
+  } else {
+    if (!templateData) { toast('请先在第1帧点击标记一个参考点'); return; }
+  }
   if (isAutoTracking) return;
   isAutoTracking = true;
   document.getElementById('autoBtn').disabled = true;
   document.getElementById('progressBar').style.display = 'block';
 
   const startFrame = points[0] ? points[0].frameIndex : 0;
-  const endTime    = duration;
   const step       = 2; // process every 2nd frame
-  let curX = templateCX, curY = templateCY;
+  let curX = points.length ? points[points.length-1].x : templateCX;
+  let curY = points.length ? points[points.length-1].y : templateCY;
   let f = startFrame + step;
   const totalF = Math.floor(duration * 60) - startFrame;
+  let crosshairMissCount = 0;
 
   while (f <= Math.floor(duration * 60)) {
     await seekFrame(f);
-    const {x, y} = findTemplate(curX, curY);
-    addPoint(x, y, vid.currentTime, f);
-    curX = x; curY = y;
-    // update template periodically
-    if (points.length % 10 === 0) captureTemplate(x, y);
+    let foundX = curX, foundY = curY;
+
+    if (trackMode === 'crosshair') {
+      // Primary: color-based red crosshair detection
+      const res = detectRedCrosshair(curX, curY, CROSSHAIR_SEARCH_R);
+      if (res.found) {
+        foundX = res.x; foundY = res.y;
+        crosshairMissCount = 0;
+      } else {
+        // Fallback to template matching when red dot not found (e.g., smoke/wall covers it)
+        crosshairMissCount++;
+        const tmpl = findTemplate(curX, curY);
+        foundX = tmpl.x; foundY = tmpl.y;
+      }
+    } else {
+      // Wall feature template matching
+      const res = findTemplate(curX, curY);
+      foundX = res.x; foundY = res.y;
+      if (points.length % 10 === 0) captureTemplate(foundX, foundY);
+    }
+
+    addPoint(foundX, foundY, vid.currentTime, f);
+    curX = foundX; curY = foundY;
 
     const pct = ((f - startFrame) / totalF * 100).toFixed(0);
     document.getElementById('progInner').style.width = pct + '%';
+    const modeLabel = trackMode === 'crosshair' ? (crosshairMissCount > 0 ? '(模板回退)' : '准星') : '特征点';
     document.getElementById('progLabel').textContent =
-      `追踪中... ${pct}% (帧${f}) Δy=${(y - points[0].y).toFixed(1)}px`;
+      `追踪${modeLabel}... ${pct}% (帧${f}) Δy=${(foundY - points[0].y).toFixed(1)}px`;
     f += step;
-    // yield to browser
     await new Promise(r => setTimeout(r, 0));
   }
 
@@ -884,6 +973,108 @@ function copyParams() {
     `interval=${p.interval}`
   ].join('\n')).join('\n\n');
   navigator.clipboard.writeText(lines).then(() => toast('参数已复制到剪贴板'));
+}
+
+/* ═══════════════ Tracking mode toggle ═══════════════ */
+function toggleTrackMode() {
+  trackMode = trackMode === 'wall' ? 'crosshair' : 'wall';
+  const btn  = document.getElementById('modeBtn');
+  const hint = document.getElementById('modeHint');
+  if (trackMode === 'crosshair') {
+    btn.textContent = '🧱 切换为墙壁追踪';
+    btn.style.background    = 'rgba(0,194,255,.12)';
+    btn.style.color         = 'var(--accent2)';
+    btn.style.borderColor   = 'rgba(0,194,255,.3)';
+    hint.innerHTML = '💡 <strong style="color:var(--accent2)">当前：准星追踪模式</strong> — '
+      + '工具自动检测画面中的<strong style="color:#fff">红色准星点</strong>，直接测量准星位移 = 后座力，无透视误差。'
+      + '第1帧点击准星附近，工具自动锁定红点，再点「自动追踪」。'
+      + '<strong style="color:var(--green)">✓ 推荐：俯视角、任意姿势均适用。</strong>';
+    document.getElementById('autoBtn').textContent = '⚡ 自动追踪准星';
+  } else {
+    btn.textContent = '🔴 切换为准星追踪';
+    btn.style.background    = 'rgba(255,51,102,.12)';
+    btn.style.color         = 'var(--accent)';
+    btn.style.borderColor   = 'rgba(255,51,102,.3)';
+    hint.innerHTML = '💡 <strong style="color:var(--accent2)">当前：墙壁模式</strong> — '
+      + '在墙上找明显特征（弹坑/污点），<strong style="color:#fff">第1帧</strong>点击标记，逐帧后点同一点，或「自动追踪」。'
+      + '<strong style="color:var(--yellow)">⚠ 有俯视角时推荐切换为准星追踪模式。</strong>';
+    document.getElementById('autoBtn').textContent = '⚡ 自动追踪';
+  }
+  clearPoints();
+}
+
+/* ═══════════════ Red crosshair color detection ═══════════════ */
+function detectRedCrosshair(searchCX, searchCY, radius) {
+  const x0 = Math.max(0, Math.floor(searchCX - radius));
+  const y0 = Math.max(0, Math.floor(searchCY - radius));
+  const w  = Math.min(radius * 2, vc.width  - x0);
+  const h  = Math.min(radius * 2, vc.height - y0);
+  if (w <= 0 || h <= 0) return { x: searchCX, y: searchCY, found: false };
+
+  const data = ctx.getImageData(x0, y0, w, h).data;
+  let sumX = 0, sumY = 0, count = 0;
+
+  for (let py = 0; py < h; py++) {
+    for (let px = 0; px < w; px++) {
+      const i = (py * w + px) * 4;
+      const r = data[i], g = data[i+1], b = data[i+2];
+      // Detect vivid red: high R, low G, low B, clearly red-dominant
+      if (r > 160 && g < 90 && b < 90 && (r - Math.max(g, b)) > 80) {
+        sumX += (x0 + px);
+        sumY += (y0 + py);
+        count++;
+      }
+    }
+  }
+  if (count >= 1) return { x: sumX / count, y: sumY / count, found: true };
+  return { x: searchCX, y: searchCY, found: false };
+}
+
+/* ═══════════════ Auto scale from game calibration params ═══════════════ */
+function updateAngleHint() {
+  const angle = parseFloat(document.getElementById('camAngleInput').value) || 0;
+  document.getElementById('angleHint').style.display = angle > 5 ? 'block' : 'none';
+}
+
+function applyAutoScale() {
+  const vidH     = vc.height || 720;
+  const screenH  = parseInt(document.getElementById('screenH').value)  || 1080;
+  const screenW  = parseInt(document.getElementById('screenW').value)  || 1920;
+  const hFov     = parseFloat(document.getElementById('hFovInput').value) || 90;
+  const camAngle = parseFloat(document.getElementById('camAngleInput').value) || 0;
+
+  // Step 1: compensate for video resolution vs game screen resolution
+  // (video may be captured at lower or same resolution as game)
+  const resScale = screenH / vidH;
+
+  // Step 2: camera angle correction (wall mode only)
+  // When looking down by θ°, a wall feature near screen-center moves roughly
+  // cos²(θ) as many pixels per degree of recoil vs looking straight ahead.
+  // Divide by cos(θ) as a first-order correction to recover true angular displacement.
+  // Crosshair mode: no correction needed — crosshair is always at screen center
+  // and moves proportionally regardless of view angle.
+  let angleScale = 1.0;
+  if (trackMode === 'wall' && camAngle > 0) {
+    angleScale = 1 / Math.cos(camAngle * Math.PI / 180);
+  }
+
+  // vFOV for reference (shown in toast)
+  const aspect = screenW / screenH;
+  const vFov   = 2 * Math.atan(Math.tan(hFov * Math.PI / 180 / 2) / aspect) * 180 / Math.PI;
+
+  let scale = resScale * angleScale;
+  scale = Math.max(0.1, Math.min(5, parseFloat(scale.toFixed(2))));
+
+  calcScale = scale;
+  const slider = document.getElementById('scaleSlider');
+  slider.value = scale;
+  document.getElementById('scaleVal').textContent = scale.toFixed(2) + '×';
+  renderResult();
+
+  const parts = [`分辨率补偿 ×${resScale.toFixed(2)}`];
+  if (angleScale !== 1) parts.push(`俯视角补偿 ×${angleScale.toFixed(2)}`);
+  parts.push(`vFOV≈${vFov.toFixed(1)}°`);
+  toast('基准缩放 ' + scale.toFixed(2) + '×  (' + parts.join(' · ') + ')');
 }
 
 /* ═══════════════ Navigation ═══════════════ */
