@@ -294,7 +294,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
       oninput="onScaleChange(this.value)">
     <span id="scaleVal" style="font-family:monospace;color:var(--yellow);min-width:40px">1.00×</span>
     <label style="display:flex;align-items:center;gap:5px;font-size:.78rem;color:var(--sub);cursor:pointer;white-space:nowrap">
-      <input type="checkbox" id="flipY" onchange="renderResult()" style="accent-color:var(--accent)"> Y翻转
+      <input type="checkbox" id="flipY" onchange="renderResult()" style="accent-color:var(--accent)"> 反转Y
     </label>
     <div style="font-size:.72rem;color:var(--sub)">调整至实际压枪效果匹配</div>
   </div>
@@ -721,7 +721,7 @@ function onScaleChange(v) {
 function renderResult() {
   if (!perBulletDy.length) return;
   const flipY = document.getElementById('flipY').checked;
-  const sign  = flipY ? 1 : -1;
+  const sign  = flipY ? -1 : 1;
   const s1 = parseInt(document.getElementById('split1').value) || 10;
   const s2 = parseInt(document.getElementById('split2').value) || 25;
 
@@ -926,25 +926,55 @@ function saveToCustom() {
   if (!ps || !ps.length) { toast('请先计算参数'); return; }
   const gunName = document.getElementById('gunNameInput').value.trim() || '视频分析配置';
   const now = new Date().toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
-  const mkPhase = p => p
-    ? { time: p.time, time_max: p.time_max, delay_min: p.delay_min,
-        delay_max: p.delay_max, x_main: p.x_main, y_main: p.y_main,
-        x_alt: 0, y_alt: 0, interval: p.interval }
-    : { time: 0, time_max: 0, delay_min: 10, delay_max: 15,
-        x_main: 0, y_main: 0, x_alt: 0, y_alt: 0, interval: 100 };
+
+  // Read phase split points and total from current UI
+  const s1    = parseInt(document.getElementById('split1').value) || 10;
+  const s2    = parseInt(document.getElementById('split2').value) || 25;
+  const useN  = parseInt(document.getElementById('useBullets').value) || perBulletDy.length;
+  const total = Math.min(useN, perBulletDy.length);
+
+  // Cumulative bullet counts for each phase end (matches device protocol)
+  const cumTime = [s1, Math.min(s2, total), total];
+
+  // Convert interval from ms to device units (~5ms per unit, range 1-255)
+  const toDeviceInterval = ms => Math.max(1, Math.min(255, Math.round(ms / 5)));
+
+  const mkPhase = (p, idx) => {
+    if (!p) {
+      // Empty phase — mirror last valid phase
+      const last = ps[ps.length - 1];
+      return { time: total, time_max: total, delay_min: last.delay_min,
+               delay_max: last.delay_max, x_main: 0, y_main: last.y_main,
+               x_alt: 0, y_alt: 0, interval: toDeviceInterval(last.interval) };
+    }
+    return {
+      time:      cumTime[idx],
+      time_max:  idx === 2 ? cumTime[idx] : cumTime[idx] + 2,
+      delay_min: p.delay_min,
+      delay_max: p.delay_max,
+      x_main:    p.x_main,
+      y_main:    p.y_main,    // positive = push mouse DOWN (correct for upward recoil)
+      x_alt:     0,
+      y_alt:     0,
+      interval:  toDeviceInterval(p.interval)
+    };
+  };
+
   const cfg = {
     id:      Date.now().toString(36),
     name:    gunName + ' 视频' + now,
     gunName: gunName,
-    phase1:  mkPhase(ps[0]),
-    phase2:  mkPhase(ps[1] || ps[0]),
-    phase3:  mkPhase(ps[2] || ps[1] || ps[0])
+    phase1:  mkPhase(ps[0], 0),
+    phase2:  mkPhase(ps[1] || ps[0], 1),
+    phase3:  mkPhase(ps[2] || ps[1] || ps[0], 2)
   };
+
   try {
     const list = JSON.parse(localStorage.getItem('custom_gun_configs') || '[]');
     list.unshift(cfg);
     localStorage.setItem('custom_gun_configs', JSON.stringify(list));
-    toast('✅ 已保存！去主工具 → 🔧 自定义配置 写入压枪器');
+    const iv = cfg.phase1.interval;
+    toast(`✅ 已保存！interval=${iv} 发数=${total} → 主工具→🔧自定义配置→写入压枪器`);
   } catch (e) {
     toast('保存失败：' + e.message);
   }
