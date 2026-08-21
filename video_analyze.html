@@ -936,15 +936,16 @@ function saveToCustom() {
   // Cumulative bullet counts for each phase end (matches device protocol)
   const cumTime = [s1, Math.min(s2, total), total];
 
-  // Convert interval from ms to device units (~5ms per unit, range 1-255)
-  const toDeviceInterval = ms => Math.max(1, Math.min(255, Math.round(ms / 5)));
+  // interval stored as byte (ms value directly); device applies 1 compensation
+  // per interval ms, so setting it to the inter-bullet period gives 1 per bullet.
+  const toDeviceInterval = ms => Math.max(1, Math.min(255, Math.round(ms)));
 
   const mkPhase = (p, idx) => {
     if (!p) {
       // Empty phase — mirror last valid phase
       const last = ps[ps.length - 1];
-      return { time: total, time_max: total, delay_min: last.delay_min,
-               delay_max: last.delay_max, x_main: 0, y_main: last.y_main,
+      return { time: total, time_max: total, delay_min: 8,
+               delay_max: 12, x_main: 0, y_main: last.y_main,
                x_alt: 0, y_alt: 0, interval: toDeviceInterval(last.interval) };
     }
     return {
