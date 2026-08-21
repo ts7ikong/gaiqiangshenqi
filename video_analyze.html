@@ -764,14 +764,21 @@ function renderResult() {
   const activeDy = perBulletDy.slice(0, Math.min(useN, perBulletDy.length));
 
   // Compute actual interval from audio, or fall back to RPM
-  let interval;
+  const rpmFallback = Math.round(60000 / (parseFloat(document.getElementById('rpmInput').value) || 600));
+  const MIN_INTERVAL = 40;   // 最快枪约1500RPM=40ms，低于此说明音频误检
+  let interval, intervalSrc;
   if (shotTimes.length > 1) {
     const useLen = Math.min(activeDy.length, shotTimes.length);
-    interval = useLen > 1
+    const audioInterval = useLen > 1
       ? Math.round((shotTimes[useLen - 1] - shotTimes[0]) / (useLen - 1) * 1000)
-      : Math.round(60000 / (parseFloat(document.getElementById('rpmInput').value) || 600));
+      : rpmFallback;
+    if (audioInterval >= MIN_INTERVAL) {
+      interval = audioInterval; intervalSrc = '音频';
+    } else {
+      interval = rpmFallback; intervalSrc = 'RPM（音频误检，已回退）';
+    }
   } else {
-    interval = Math.round(60000 / (parseFloat(document.getElementById('rpmInput').value) || 600));
+    interval = rpmFallback; intervalSrc = 'RPM';
   }
 
   const phases = [
@@ -821,7 +828,7 @@ function renderResult() {
   renderResultCanvas(activeDy, phases, sign, s1, s2);
   renderScatterCanvas(activeDy, params, sign, s1, s2);
   renderSimCanvas(activeDy, params, sign, s1, s2);
-  renderParamsGrid(params, devParams, subMoves);
+  renderParamsGrid(params, devParams, subMoves, interval, intervalSrc);
   document.getElementById('rawDataView').textContent =
     'dy/bullet: [' + activeDy.map(v => v.toFixed(1)).join(', ') + ']';
   window._calcParams = params;
@@ -1115,7 +1122,7 @@ function renderSimCanvas(activeDy, params, sign, s1, s2) {
   sCtx.fillText('0', 18, zeroY + 3);
 }
 
-function renderParamsGrid(params, devParams, subMoves) {
+function renderParamsGrid(params, devParams, subMoves, interval, intervalSrc) {
   const names   = ['阶段1（前段）', '阶段2（中段）', '阶段3（后段）'];
   const colors  = ['rgba(0,208,132,.15)', 'rgba(139,92,255,.15)', 'rgba(255,71,87,.15)'];
   const borders = ['rgba(0,208,132,.3)',  'rgba(139,92,255,.3)',  'rgba(255,71,87,.3)'];
@@ -1140,11 +1147,15 @@ function renderParamsGrid(params, devParams, subMoves) {
     const sm = devParams[0].subMoves;
     const hint = document.getElementById('calibHint');
     hint.style.display = 'block';
+    const srcWarn = intervalSrc && intervalSrc.includes('回退')
+      ? `<br>⚠️ <b style="color:#FFB347">音频检测到异常短间隔，已自动回退到 RPM 输入值（${interval}ms）</b>——若压枪发数还不对请检查 RPM 输入是否正确。`
+      : '';
     hint.innerHTML =
-      `<b>设备实际</b>：每次补偿 <b style="color:#00C2FF">y_main=${ym}</b>，每发触发 <b>${sm}</b> 次，共 <b>${ym*sm}/发</b>。<br>
-       若游戏中<b>仍往上飘</b> → 说明灵敏度换算比 &lt; 1:1，请<b>上调 calcScale</b>（尝试 1.5 → 2 → 3）再重新保存测试。<br>
-       若游戏中<b>往下飘</b> → 说明过补偿，<b>降低 calcScale</b>（尝试 0.7 → 0.5）。<br>
-       找到合适倍数后，该 calcScale 值对同灵敏度/同镜倍下所有枪械通用。`;
+      `<b>射速</b>：${interval}ms/发（来源：${intervalSrc || 'RPM'}），每发 ${sm} 次补偿事件${srcWarn}<br>
+       <b>设备实际</b>：每次补偿 <b style="color:#00C2FF">y_main=${ym}</b>，共 <b>${ym*sm}/发</b>。<br>
+       若游戏中<b>仍往上飘</b> → <b>上调 calcScale</b>（1.5 → 2 → 3）再重新保存测试。<br>
+       若游戏中<b>往下飘</b> → <b>降低 calcScale</b>（0.7 → 0.5）。<br>
+       找到合适倍数后，该 calcScale 对同灵敏度/同镜倍所有枪通用。`;
   }
 }
 
@@ -1235,7 +1246,11 @@ function saveToCustom() {
   // 结论：time 是「补偿事件计数（ticks）」，不是子弹数
   // 正确公式：time_ticks = bullets × (gun_period ÷ interval)
   const DEVICE_INTERVAL = 10;
-  const gunPeriod = ps[0] ? ps[0].interval : 100;   // gun fire period in ms
+  const MIN_GUN_PERIOD  = 40;   // 最快约1500RPM
+  const rawPeriod = ps[0] ? ps[0].interval : 100;
+  const rpmPeriod = Math.round(60000 / (parseFloat(document.getElementById('rpmInput').value) || 600));
+  // 若存储的 interval < 40ms（音频误检），回退到RPM输入值
+  const gunPeriod = rawPeriod >= MIN_GUN_PERIOD ? rawPeriod : rpmPeriod;
   const subMoves  = Math.max(1, Math.round(gunPeriod / DEVICE_INTERVAL));  // ticks per bullet
 
   // cumTime in TICKS (not bullets)
