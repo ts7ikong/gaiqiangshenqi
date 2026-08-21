@@ -181,13 +181,17 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
     <div style="flex:1">
       <div style="font-size:.95rem;font-weight:700;color:var(--accent2);margin-bottom:3px">🤖 智能准星追踪</div>
       <div id="quickStatus" style="font-size:.78rem;color:var(--sub)">
-        工具自动在画面中心区域找<strong style="color:#FF3366">红色准星点</strong>，逐帧追踪出完整后座力曲线
+        在视频画面上<strong style="color:#00C2FF">拖拽画出准星所在区域</strong>，然后点「🚀 一键智能分析」
       </div>
     </div>
-    <button class="btn btn-primary" id="quickBtn" onclick="oneClickAnalyze()"
-      style="white-space:nowrap;padding:10px 22px;font-size:.95rem">
-      🚀 一键智能分析
-    </button>
+    <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+      <button class="btn btn-primary" id="quickBtn" onclick="oneClickAnalyze()"
+        style="white-space:nowrap;padding:10px 22px;font-size:.95rem">
+        🚀 一键智能分析
+      </button>
+      <button class="btn btn-sm" id="clearRoiBtn" onclick="clearRoi()" style="display:none;
+        font-size:.72rem;color:var(--sub);padding:3px 10px">✕ 清除区域</button>
+    </div>
   </div>
 
   <div class="ana-layout">
@@ -379,6 +383,11 @@ const SEARCH_R  = 200;     // search radius px (at original res)
 let trackMode = 'crosshair'; // default: crosshair mode
 const CROSSHAIR_SEARCH_R = 80; // search radius for red crosshair detection (px)
 
+// ROI for crosshair search (user-drawn rectangle on canvas)
+let roiRect = null;       // {x, y, w, h} in canvas pixels — null = not set
+let roiDragStart = null;  // {x, y} — null when not dragging
+let isDrawingRoi = false;
+
 /* ═══════════════ Step 1: Load ═══════════════ */
 const uploadZone = document.getElementById('uploadZone');
 uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('drag'); });
@@ -466,6 +475,21 @@ function drawFrame() {
       ctx.stroke();
     }
   });
+  // draw ROI rectangle if set
+  if (roiRect && roiRect.w > 2 && roiRect.h > 2) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(0,194,255,0.9)';
+    ctx.lineWidth   = 2;
+    ctx.setLineDash([8, 4]);
+    ctx.strokeRect(roiRect.x, roiRect.y, roiRect.w, roiRect.h);
+    ctx.fillStyle = 'rgba(0,194,255,0.07)';
+    ctx.fillRect(roiRect.x, roiRect.y, roiRect.w, roiRect.h);
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(0,194,255,0.9)';
+    ctx.font = 'bold 12px sans-serif';
+    ctx.fillText('准星区域', roiRect.x + 4, roiRect.y + 16);
+    ctx.restore();
+  }
   // overlay
   document.getElementById('overlay').textContent =
     `帧 ${currentFrame} / ~${Math.floor(duration*60)} · ${vid.currentTime.toFixed(3)}s`;
@@ -491,26 +515,73 @@ document.addEventListener('keydown', e => {
   if (e.key === 'z' && e.ctrlKey) { e.preventDefault(); undoPoint(); }
 });
 
-/* ═══════════════ Canvas click → mark point ═══════════════ */
-vc.addEventListener('click', e => {
-  if (isAutoTracking) return;
-  const rect = vc.getBoundingClientRect();
-  const scaleX = vc.width  / rect.width;
-  const scaleY = vc.height / rect.height;
-  let x = (e.clientX - rect.left) * scaleX;
-  let y = (e.clientY - rect.top)  * scaleY;
+/* ═══════════════ Canvas mouse → ROI draw or point mark ═══════════════ */
+let _roiDragStart = null, _roiDragLive = null, _isDragging = false;
 
+function getCanvasCoords(e) {
+  const r = vc.getBoundingClientRect();
+  return { cx: (e.clientX - r.left) * (vc.width / r.width),
+           cy: (e.clientY - r.top)  * (vc.height / r.height) };
+}
+function normalizeRect(a, b) {
+  return { x: Math.min(a.cx, b.cx), y: Math.min(a.cy, b.cy),
+           w: Math.abs(b.cx - a.cx), h: Math.abs(b.cy - a.cy) };
+}
+
+vc.addEventListener('mousedown', e => {
+  if (isAutoTracking) return;
+  _roiDragStart = getCanvasCoords(e);
+  _roiDragLive  = { ..._roiDragStart };
+  _isDragging   = false;
+});
+
+vc.addEventListener('mousemove', e => {
+  if (!_roiDragStart || isAutoTracking) return;
+  _roiDragLive = getCanvasCoords(e);
+  const dx = _roiDragLive.cx - _roiDragStart.cx;
+  const dy = _roiDragLive.cy - _roiDragStart.cy;
+  if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+    _isDragging = true;
+    roiRect = normalizeRect(_roiDragStart, _roiDragLive);
+    drawFrame();
+  }
+});
+
+vc.addEventListener('mouseup', e => {
+  if (!_roiDragStart || isAutoTracking) { _roiDragStart = null; return; }
+  const end = getCanvasCoords(e);
+  if (_isDragging) {
+    roiRect = normalizeRect(_roiDragStart, end);
+    drawFrame();
+    document.getElementById('clearRoiBtn').style.display = 'block';
+    document.getElementById('quickStatus').innerHTML =
+      '✅ 准星区域已标记，点击「🚀 一键智能分析」开始追踪';
+  } else {
+    handleCanvasClick(end.cx, end.cy);
+  }
+  _roiDragStart = null;
+  _isDragging   = false;
+});
+
+function clearRoi() {
+  roiRect = null;
+  document.getElementById('clearRoiBtn').style.display = 'none';
+  document.getElementById('quickStatus').innerHTML =
+    '在视频画面上<strong style="color:#00C2FF">拖拽画出准星所在区域</strong>，然后点「🚀 一键智能分析」';
+  drawFrame();
+}
+
+function handleCanvasClick(x, y) {
   if (trackMode === 'crosshair') {
-    // Snap to the nearest red pixel cluster around click point
     const res = detectRedCrosshair(x, y, CROSSHAIR_SEARCH_R);
     if (res.found) { x = res.x; y = res.y; toast('已锁定红色准星 (' + x.toFixed(0) + ',' + y.toFixed(0) + ')'); }
     else { toast('未检测到红色准星，已使用点击位置'); }
-    if (points.length === 0) captureTemplate(x, y); // keep template as fallback
+    if (points.length === 0) captureTemplate(x, y);
   } else {
     if (points.length === 0) captureTemplate(x, y);
   }
   addPoint(x, y, vid.currentTime, currentFrame);
-});
+}
 
 function addPoint(x, y, t, f) {
   // replace if same frame already exists
@@ -954,21 +1025,28 @@ async function oneClickAnalyze() {
   status.textContent = '⏳ 定位第一帧...';
   await seekFrame(0);
 
-  // Step 2: scan center region for red crosshair
-  // Scan center 30% of screen width/height (crosshair is always near center)
-  const scanR = Math.min(vc.width, vc.height) * 0.15;
+  // Step 2: detect red crosshair — use user-drawn ROI first, else scan center
   status.textContent = '🔍 自动检测红色准星...';
-  const res = detectRedCrosshair(vc.width / 2, vc.height / 2, scanR);
-
-  if (!res.found) {
-    // Widen search radius before giving up
-    const res2 = detectRedCrosshair(vc.width / 2, vc.height / 2, vc.height * 0.4);
-    if (!res2.found) {
-      status.innerHTML = '⚠️ 未检测到红色准星。请展开「手动模式」，手动点击准星位置后追踪。';
+  let res;
+  if (roiRect && roiRect.w > 10 && roiRect.h > 10) {
+    res = detectRedCrosshairInRect(roiRect);
+    if (!res.found) {
+      status.innerHTML = '⚠️ 标记区域内未检测到红色准星。请重新在画面上拖拽画出准星区域，或展开「手动模式」。';
       btn.disabled = false;
       return;
     }
-    Object.assign(res, res2);
+  } else {
+    const scanR = Math.min(vc.width, vc.height) * 0.15;
+    res = detectRedCrosshair(vc.width / 2, vc.height / 2, scanR);
+    if (!res.found) {
+      const res2 = detectRedCrosshair(vc.width / 2, vc.height / 2, vc.height * 0.4);
+      if (!res2.found) {
+        status.innerHTML = '⚠️ 未检测到红色准星。请在视频画面上<strong style="color:#00C2FF">拖拽画出准星所在区域</strong>后再试。';
+        btn.disabled = false;
+        return;
+      }
+      Object.assign(res, res2);
+    }
   }
 
   status.innerHTML = `✅ 准星锁定 (${res.x.toFixed(0)}, ${res.y.toFixed(0)}) · 开始逐帧追踪...`;
@@ -1055,30 +1133,37 @@ function toggleTrackMode() {
 }
 
 /* ═══════════════ Red crosshair color detection ═══════════════ */
+function _scanRedPixels(x0, y0, w, h, fallbackX, fallbackY) {
+  if (w <= 0 || h <= 0) return { x: fallbackX, y: fallbackY, found: false };
+  const data = ctx.getImageData(x0, y0, w, h).data;
+  let sumX = 0, sumY = 0, count = 0;
+  for (let py = 0; py < h; py++) {
+    for (let px = 0; px < w; px++) {
+      const i = (py * w + px) * 4;
+      const r = data[i], g = data[i+1], b = data[i+2];
+      if (r > 160 && g < 90 && b < 90 && (r - Math.max(g, b)) > 80) {
+        sumX += (x0 + px); sumY += (y0 + py); count++;
+      }
+    }
+  }
+  if (count >= 1) return { x: sumX / count, y: sumY / count, found: true };
+  return { x: fallbackX, y: fallbackY, found: false };
+}
+
 function detectRedCrosshair(searchCX, searchCY, radius) {
   const x0 = Math.max(0, Math.floor(searchCX - radius));
   const y0 = Math.max(0, Math.floor(searchCY - radius));
   const w  = Math.min(radius * 2, vc.width  - x0);
   const h  = Math.min(radius * 2, vc.height - y0);
-  if (w <= 0 || h <= 0) return { x: searchCX, y: searchCY, found: false };
+  return _scanRedPixels(x0, y0, w, h, searchCX, searchCY);
+}
 
-  const data = ctx.getImageData(x0, y0, w, h).data;
-  let sumX = 0, sumY = 0, count = 0;
-
-  for (let py = 0; py < h; py++) {
-    for (let px = 0; px < w; px++) {
-      const i = (py * w + px) * 4;
-      const r = data[i], g = data[i+1], b = data[i+2];
-      // Detect vivid red: high R, low G, low B, clearly red-dominant
-      if (r > 160 && g < 90 && b < 90 && (r - Math.max(g, b)) > 80) {
-        sumX += (x0 + px);
-        sumY += (y0 + py);
-        count++;
-      }
-    }
-  }
-  if (count >= 1) return { x: sumX / count, y: sumY / count, found: true };
-  return { x: searchCX, y: searchCY, found: false };
+function detectRedCrosshairInRect(rect) {
+  const x0 = Math.max(0, Math.floor(rect.x));
+  const y0 = Math.max(0, Math.floor(rect.y));
+  const w  = Math.min(Math.ceil(rect.w), vc.width  - x0);
+  const h  = Math.min(Math.ceil(rect.h), vc.height - y0);
+  return _scanRedPixels(x0, y0, w, h, rect.x + rect.w / 2, rect.y + rect.h / 2);
 }
 
 
