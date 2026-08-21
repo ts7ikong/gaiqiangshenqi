@@ -866,7 +866,7 @@ function renderResultCanvas(all, phases, sign, s1, s2) {
   });
 }
 
-/* ── 弹道散布图 ── */
+/* ── 弹道散布图（左列=无压枪 右列=压枪后） ── */
 function renderScatterCanvas(activeDy, params, sign, s1, s2) {
   const sc   = document.getElementById('scatterCanvas');
   sc.width   = sc.offsetWidth || 420;
@@ -874,111 +874,108 @@ function renderScatterCanvas(activeDy, params, sign, s1, s2) {
   const sCtx = sc.getContext('2d');
   const cw = sc.width, ch = sc.height;
   sCtx.clearRect(0, 0, cw, ch);
-
   const n = activeDy.length;
   if (!n || !params || !params.length) return;
 
-  // Cumulative recoil in device units (positive = gun kicks up = crosshair drifts up)
-  let cumY = 0;
-  const cumRecoil = activeDy.map(d => { cumY += d * sign * calcScale; return cumY; });
+  // Cumulative recoil in device-equivalent units (positive = up)
+  let cy = 0;
+  const cumRecoil = activeDy.map(d => { cy += d * sign * calcScale; return cy; });
 
-  // Cumulative compensation per bullet using computed params
-  const ps = params;
-  let compAcc = 0;
+  // Cumulative compensation
+  let ca = 0;
   const cumComp = activeDy.map((_, i) => {
-    let p = i < s1 ? ps[0] : i < s2 ? (ps[1] || ps[0]) : (ps[2] || ps[1] || ps[0]);
-    if (p) compAcc += p.y_main;
-    return compAcc;
+    const p = i < s1 ? params[0] : i < s2 ? (params[1] || params[0]) : (params[2] || params[1] || params[0]);
+    if (p) ca += p.y_main;
+    return ca;
   });
-
-  // Net residual after compensation
   const cumNet = cumRecoil.map((r, i) => r - cumComp[i]);
 
-  // Layout: aim point at bottom-center; recoil goes UP (smaller py)
-  const padL = 30, padR = 12, padT = 10, padB = 22;
-  const cx   = Math.floor((cw - padL - padR) / 2) + padL;
-  const aimY = ch - padB;  // aim point at bottom
-  const maxRecoil = Math.max(1, ...cumRecoil.map(Math.abs));
-  const scaleV = (ch - padT - padB) / maxRecoil;
+  const maxV = Math.max(1, ...cumRecoil.map(Math.abs));
 
-  const toScreenY = v => aimY - v * scaleV;  // positive v → moves up on canvas (smaller py)
-  const dotX = cx;
+  // Layout: left column = raw, right column = compensated
+  const padL = 32, padR = 12, padT = 22, padB = 26;
+  const plotH = ch - padT - padB;
+  const rawX  = padL + (cw - padL - padR) * 0.25;
+  const netX  = padL + (cw - padL - padR) * 0.72;
+  const aimY  = padT + plotH;  // aim point at bottom
 
-  // Background phase bands (vertical strips by bullet index mapped to Y)
-  const phaseRanges = [[0, s1], [s1, Math.min(s2, n)], [Math.min(s2, n), n]];
-  const phaseBg = ['rgba(0,208,132,.06)', 'rgba(139,92,255,.06)', 'rgba(255,71,87,.06)'];
-  phaseRanges.forEach(([a, b], pi) => {
-    if (a >= b) return;
-    const y1 = toScreenY(cumRecoil[b - 1] || 0);
-    const y2 = (pi === 0) ? aimY : toScreenY(cumRecoil[a - 1] || 0);
-    sCtx.fillStyle = phaseBg[pi];
-    sCtx.fillRect(padL, Math.min(y1, y2) - 4, cw - padL - padR, Math.abs(y2 - y1) + 8);
-  });
+  // v > 0 → bullet above aim → higher on canvas (smaller py)
+  const toY = v => aimY - Math.max(0, v / maxV) * plotH * 0.92;
 
-  // Concentric rings at 25%, 50%, 75%, 100% of max recoil
+  // Column background tint
+  sCtx.fillStyle = 'rgba(255,51,102,.04)';
+  sCtx.fillRect(padL, padT, (cw - padL - padR) * 0.5, plotH);
+  sCtx.fillStyle = 'rgba(0,208,132,.04)';
+  sCtx.fillRect(padL + (cw - padL - padR) * 0.5, padT, (cw - padL - padR) * 0.5, plotH);
+
+  // Vertical divider
+  const midX = padL + (cw - padL - padR) * 0.5;
+  sCtx.strokeStyle = 'rgba(255,255,255,.1)'; sCtx.lineWidth = 1;
+  sCtx.setLineDash([3, 5]);
+  sCtx.beginPath(); sCtx.moveTo(midX, padT); sCtx.lineTo(midX, aimY); sCtx.stroke();
+  sCtx.setLineDash([]);
+
+  // Column headers
+  sCtx.font = 'bold 9px sans-serif'; sCtx.textAlign = 'center';
+  sCtx.fillStyle = 'rgba(255,80,100,.85)';
+  sCtx.fillText('原始弹道（无压枪）', rawX, padT - 8);
+  sCtx.fillStyle = 'rgba(0,208,132,.85)';
+  sCtx.fillText('压枪后残留偏移', netX, padT - 8);
+  sCtx.textAlign = 'left';
+
+  // Horizontal gridlines at 25%, 50%, 75%, 100%
   [0.25, 0.5, 0.75, 1.0].forEach(r => {
-    const ry = r * maxRecoil * scaleV;
-    sCtx.strokeStyle = r === 1.0 ? 'rgba(255,255,255,.12)' : 'rgba(255,255,255,.07)';
-    sCtx.lineWidth = 1;
-    sCtx.setLineDash(r === 1.0 ? [] : [3, 4]);
-    sCtx.beginPath(); sCtx.arc(cx, aimY, ry, 0, Math.PI * 2); sCtx.stroke();
+    const py = toY(r * maxV);
+    sCtx.strokeStyle = `rgba(255,255,255,${r === 1 ? .1 : .05})`;
+    sCtx.lineWidth = 1; sCtx.setLineDash([2, 5]);
+    sCtx.beginPath(); sCtx.moveTo(padL, py); sCtx.lineTo(cw - padR, py); sCtx.stroke();
     sCtx.setLineDash([]);
-    if (r < 1.0) {
-      sCtx.fillStyle = 'rgba(255,255,255,.2)';
-      sCtx.font = '8px monospace';
-      sCtx.fillText(Math.round(r * maxRecoil), cx + ry + 2, aimY - 2);
-    }
+    sCtx.fillStyle = 'rgba(255,255,255,.2)'; sCtx.font = '8px monospace';
+    sCtx.fillText(Math.round(r * maxV), 2, py + 3);
   });
 
-  // Aim crosshair
-  sCtx.strokeStyle = 'rgba(255,255,255,.35)';
-  sCtx.lineWidth = 1;
-  sCtx.beginPath();
-  sCtx.moveTo(cx - 10, aimY); sCtx.lineTo(cx + 10, aimY);
-  sCtx.moveTo(cx, aimY - 10); sCtx.lineTo(cx, aimY + 10);
-  sCtx.stroke();
-  sCtx.fillStyle = 'rgba(255,255,255,.3)'; sCtx.font = '8px monospace';
-  sCtx.fillText('瞄准点', cx + 5, aimY - 4);
+  // Aim point line
+  sCtx.strokeStyle = 'rgba(255,255,255,.2)'; sCtx.lineWidth = 1;
+  sCtx.beginPath(); sCtx.moveTo(padL, aimY); sCtx.lineTo(cw - padR, aimY); sCtx.stroke();
+  sCtx.fillStyle = 'rgba(255,255,255,.25)'; sCtx.font = '8px monospace';
+  sCtx.fillText('← 瞄准点', 2, aimY + 3);
 
-  // Draw raw recoil path
-  sCtx.strokeStyle = 'rgba(255,51,102,.5)';
-  sCtx.lineWidth = 1.5; sCtx.setLineDash([3, 3]);
-  sCtx.beginPath();
-  sCtx.moveTo(dotX - 8, aimY);
-  cumRecoil.forEach(v => sCtx.lineTo(dotX - 8, toScreenY(v)));
-  sCtx.stroke(); sCtx.setLineDash([]);
+  // Phase color per bullet
+  const pColor = i => i < s1 ? '#44DDCC' : i < s2 ? '#AA88FF' : '#FF9966';
 
-  // Draw net path
-  sCtx.strokeStyle = 'rgba(0,208,132,.8)';
-  sCtx.lineWidth = 2;
-  sCtx.beginPath();
-  sCtx.moveTo(dotX + 8, aimY);
-  cumNet.forEach(v => sCtx.lineTo(dotX + 8, toScreenY(v)));
-  sCtx.stroke();
+  // Helper: draw one column of dots + connecting line
+  const drawCol = (data, x, lineColor, labelColor) => {
+    // Line from aim point through all dots
+    sCtx.strokeStyle = lineColor + '55'; sCtx.lineWidth = 1.5;
+    sCtx.beginPath(); sCtx.moveTo(x, aimY);
+    data.forEach(v => sCtx.lineTo(x, toY(v)));
+    sCtx.stroke();
 
-  // Dots + labels every 5th bullet
-  const phaseColor = i => i < s1 ? '#FF3366' : i < s2 ? '#AA44FF' : '#FF6633';
-  cumRecoil.forEach((v, i) => {
-    const py = toScreenY(v);
-    // Small dot for raw recoil
-    sCtx.fillStyle = phaseColor(i) + (i === n - 1 ? 'FF' : '88');
-    sCtx.beginPath(); sCtx.arc(dotX - 8, py, i === n - 1 ? 4 : 2.5, 0, Math.PI * 2); sCtx.fill();
-    if (i % 5 === 0 || i === n - 1) {
-      sCtx.fillStyle = 'rgba(255,255,255,.35)'; sCtx.font = '8px monospace';
-      sCtx.fillText(i + 1, padL - 26, py + 3);
-    }
-  });
-  cumNet.forEach((v, i) => {
-    const py = toScreenY(v);
-    sCtx.fillStyle = '#00D084' + (i === n - 1 ? 'FF' : '99');
-    sCtx.beginPath(); sCtx.arc(dotX + 8, py, i === n - 1 ? 4 : 2.5, 0, Math.PI * 2); sCtx.fill();
-  });
+    // Dots
+    data.forEach((v, i) => {
+      const py = toY(v);
+      sCtx.fillStyle = pColor(i); sCtx.globalAlpha = i === n - 1 ? 1 : .6;
+      sCtx.beginPath(); sCtx.arc(x, py, i === n - 1 ? 4 : 2.5, 0, Math.PI * 2); sCtx.fill();
+      sCtx.globalAlpha = 1;
+      // Milestone labels every 10 bullets
+      if (i === 0 || (i + 1) % 10 === 0 || i === n - 1) {
+        sCtx.fillStyle = labelColor; sCtx.font = '8px monospace'; sCtx.textAlign = 'left';
+        sCtx.fillText(`${i + 1}`, x + 5, py + 3);
+      }
+    });
+  };
 
-  // Y-axis label
-  sCtx.fillStyle = 'rgba(255,255,255,.2)'; sCtx.font = '8px monospace';
-  sCtx.save(); sCtx.translate(8, (aimY + padT) / 2);
-  sCtx.rotate(-Math.PI / 2); sCtx.fillText('后座力 ↑', -18, 0);
-  sCtx.restore();
+  drawCol(cumRecoil, rawX, '#FF3366', 'rgba(255,80,100,.5)');
+  drawCol(cumNet,    netX, '#00D084', 'rgba(0,208,132,.5)');
+
+  // Match quality at bottom
+  const finalNet = cumNet[n - 1];
+  const finalRaw = cumRecoil[n - 1];
+  const pct = Math.max(0, Math.round((1 - Math.abs(finalNet) / Math.max(1, Math.abs(finalRaw))) * 100));
+  sCtx.font = 'bold 9px monospace'; sCtx.textAlign = 'center';
+  sCtx.fillStyle = pct > 80 ? '#00D084' : pct > 50 ? '#FFAA00' : '#FF4757';
+  sCtx.fillText(`压枪匹配度 ${pct}%`, cw / 2, ch - 8);
+  sCtx.textAlign = 'left';
 }
 
 /* ── 压枪模拟曲线 ── */
@@ -1197,28 +1194,35 @@ function saveToCustom() {
   // Cumulative bullet counts for each phase end (matches device protocol)
   const cumTime = [s1, Math.min(s2, total), total];
 
-  // interval stored as byte (ms value directly); device applies 1 compensation
-  // per interval ms, so setting it to the inter-bullet period gives 1 per bullet.
-  const toDeviceInterval = ms => Math.max(1, Math.min(255, Math.round(ms)));
+  // 固定 interval=16ms（与 S-curve 参考一致）。
+  // 每发子弹内设备补偿次数 = floor(gun_period / 16)，因此
+  // 每次补偿的 y_main_device = y_main_per_bullet / subMoves
+  const DEVICE_INTERVAL = 16;
+  const gunPeriod = ps[0] ? ps[0].interval : 100;   // gun fire period in ms (stored in params.interval)
+  const subMoves  = Math.max(1, Math.round(gunPeriod / DEVICE_INTERVAL));
+
+  const toDeviceYmain = yPerBullet => {
+    const v = Math.round(yPerBullet / subMoves);
+    return v === 0 ? Math.sign(yPerBullet) || 1 : v;   // 至少 ±1，方向正确
+  };
 
   const mkPhase = (p, idx) => {
     if (!p) {
-      // Empty phase — mirror last valid phase
       const last = ps[ps.length - 1];
       return { time: total, time_max: total, delay_min: 8,
-               delay_max: 12, x_main: 0, y_main: last.y_main,
-               x_alt: 0, y_alt: 0, interval: toDeviceInterval(last.interval) };
+               delay_max: 12, x_main: 0, y_main: toDeviceYmain(last.y_main),
+               x_alt: 0, y_alt: 0, interval: DEVICE_INTERVAL };
     }
     return {
       time:      cumTime[idx],
       time_max:  idx === 2 ? cumTime[idx] : cumTime[idx] + 2,
       delay_min: p.delay_min,
       delay_max: p.delay_max,
-      x_main:    p.x_main,
-      y_main:    p.y_main,    // positive = push mouse DOWN (correct for upward recoil)
+      x_main:    0,
+      y_main:    toDeviceYmain(p.y_main),  // per-sub-move, × subMoves = per-bullet
       x_alt:     0,
       y_alt:     0,
-      interval:  toDeviceInterval(p.interval)
+      interval:  DEVICE_INTERVAL
     };
   };
 
@@ -1235,8 +1239,9 @@ function saveToCustom() {
     const list = JSON.parse(localStorage.getItem('custom_gun_configs') || '[]');
     list.unshift(cfg);
     localStorage.setItem('custom_gun_configs', JSON.stringify(list));
-    const iv = cfg.phase1.interval;
-    toast(`✅ 已保存！interval=${iv} 发数=${total} → 主工具→🔧自定义配置→写入压枪器`);
+    const iv  = cfg.phase1.interval;
+    const ym1 = cfg.phase1.y_main;
+    toast(`✅ 已保存！interval=${iv}ms × ${subMoves}次/发 y_main=${ym1}×${subMoves}=${ym1*subMoves}/发 → 主工具→🔧自定义配置→写入`);
   } catch (e) {
     toast('保存失败：' + e.message);
   }
