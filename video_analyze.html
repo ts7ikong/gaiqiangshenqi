@@ -753,8 +753,8 @@ function renderResult() {
     return {
       time:      ph.length,
       time_max:  ph.length + 2,
-      delay_min: Math.max(5, Math.round(interval * 0.85)),
-      delay_max: Math.round(interval * 1.15),
+      delay_min: 8,   // fixed trigger-response delay (same as S-curve reference)
+      delay_max: 12,
       x_main:    0,
       y_main:    yMain,
       x_alt:     0,
