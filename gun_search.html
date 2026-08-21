@@ -1778,6 +1778,16 @@ function importCustomConfigs(input) {
   reader.readAsText(file, 'utf-8');
 }
 
+// ========== 从视频分析工具直接跳转到自定义配置 ==========
+if (location.hash === '#showCustom') {
+  window.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('uploadSection').style.display = 'none';
+    const cs = document.getElementById('customSection');
+    cs.style.display = 'block';
+    renderCustomList();
+  });
+}
+
 // ========== 工具 ==========
 function copy(text,label){
   navigator.clipboard.writeText(text).then(()=>showToast('✅ '+label+'已复制！')).catch(()=>{const ta=document.createElement('textarea');ta.value=text;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);showToast('✅ '+label+'已复制！');});

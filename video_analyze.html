@@ -94,7 +94,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
 .empty-hint{text-align:center;padding:20px;color:var(--sub);font-size:.8rem}
 
 /* ── 弹道预览 ── */
-#trajCanvas{width:100%;height:180px;display:block;border-radius:8px;background:#080a14}
+#trajCanvas{width:100%;height:240px;display:block;border-radius:8px;background:#080a14}
 .traj-legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:6px;font-size:.72rem;color:var(--sub)}
 
 /* ── 参数区 ── */
@@ -319,6 +319,9 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
     <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn-sm btn-blue" onclick="exportJson()">📥 trajectory.json</button>
       <button class="btn btn-sm btn-primary" onclick="copyParams()">📋 复制参数</button>
+      <button class="btn btn-sm btn-green" onclick="importToCustomConfig()" style="font-size:.82rem">
+        ⚡ 一键导入自定义配置
+      </button>
     </div>
   </div>
 
@@ -479,27 +482,29 @@ vid.addEventListener('seeked', drawFrame);
 
 function drawFrame() {
   ctx.drawImage(vid, 0, 0, vc.width, vc.height);
-  // Only draw the latest tracked point as a small crosshair indicator.
-  // Historical points are shown in the trajectory preview panel — no need
-  // to scatter them all over the video canvas.
-  if (points.length > 0) {
-    const p = points[points.length - 1];
-    const R = 8, L = 14;
-    ctx.save();
-    ctx.strokeStyle = '#FF3366';
-    ctx.lineWidth   = 2;
+  // Draw full trajectory trail: connecting line + blue dots + red crosshair on last point
+  if (points.length > 1) {
     ctx.beginPath();
-    ctx.moveTo(p.x - L, p.y); ctx.lineTo(p.x - R, p.y);
-    ctx.moveTo(p.x + R, p.y); ctx.lineTo(p.x + L, p.y);
-    ctx.moveTo(p.x, p.y - L); ctx.lineTo(p.x, p.y - R);
-    ctx.moveTo(p.x, p.y + R); ctx.lineTo(p.x, p.y + L);
+    points.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+    ctx.strokeStyle = 'rgba(0,208,132,0.5)';
+    ctx.lineWidth = 1.5;
     ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, R, 0, Math.PI * 2);
-    ctx.strokeStyle = 'rgba(255,51,102,0.7)';
-    ctx.stroke();
-    ctx.restore();
   }
+  points.forEach((p, i) => {
+    const isLast = i === points.length - 1;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, isLast ? 5 : 3, 0, Math.PI * 2);
+    ctx.fillStyle = isLast ? '#FF3366' : 'rgba(0,194,255,0.85)';
+    ctx.fill();
+    if (isLast) {
+      // crosshair ring on current position
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 10, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(255,51,102,0.6)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+  });
   // draw ROI rectangle if set
   if (roiRect && roiRect.w > 2 && roiRect.h > 2) {
     ctx.save();
@@ -774,33 +779,57 @@ function findTemplate(lastX, lastY) {
 /* ═══════════════ Trajectory preview ═══════════════ */
 function renderTraj() {
   const cw = trajCanvas.width  = trajCanvas.offsetWidth  || 240;
-  const ch = trajCanvas.height = trajCanvas.offsetHeight || 180;
+  const ch = trajCanvas.height = trajCanvas.offsetHeight || 240;
   trajCtx.clearRect(0, 0, cw, ch);
   if (points.length < 2) return;
 
   const base = points[0];
   const dys  = points.map(p => p.y - base.y);
-  const maxDy = Math.max(1, ...dys.map(Math.abs));
+  const minDy = Math.min(0, ...dys);
+  const maxDy = Math.max(1, ...dys);
+  const range = Math.max(1, maxDy - minDy);
+  const PAD   = 14;
 
-  trajCtx.strokeStyle = 'rgba(0,194,255,.8)';
+  // Map dy to canvas y: largest dy at top, 0 near bottom
+  const toY = dy => ch - PAD - ((dy - minDy) / range) * (ch - PAD * 2);
+
+  // Zero reference line
+  const zeroY = toY(0);
+  trajCtx.strokeStyle = 'rgba(255,255,255,.12)';
+  trajCtx.lineWidth = 1;
+  trajCtx.setLineDash([4, 4]);
+  trajCtx.beginPath();
+  trajCtx.moveTo(0, zeroY); trajCtx.lineTo(cw, zeroY);
+  trajCtx.stroke();
+  trajCtx.setLineDash([]);
+
+  // Curve
+  trajCtx.strokeStyle = 'rgba(0,194,255,.85)';
   trajCtx.lineWidth   = 2;
   trajCtx.beginPath();
   points.forEach((p, i) => {
-    const px = (i / (points.length-1)) * (cw - 20) + 10;
-    const py = ch - ((p.y - base.y) / maxDy * (ch-20) + 10);
+    const px = (i / (points.length - 1)) * (cw - PAD * 2) + PAD;
+    const py = toY(p.y - base.y);
     i === 0 ? trajCtx.moveTo(px, py) : trajCtx.lineTo(px, py);
   });
   trajCtx.stroke();
 
-  // dots
+  // Dots (every 5th to avoid clutter)
   points.forEach((p, i) => {
-    const px = (i / (points.length-1)) * (cw - 20) + 10;
-    const py = ch - ((p.y - base.y) / maxDy * (ch-20) + 10);
+    if (i % 5 !== 0 && i !== points.length - 1) return;
+    const px = (i / (points.length - 1)) * (cw - PAD * 2) + PAD;
+    const py = toY(p.y - base.y);
     trajCtx.beginPath();
-    trajCtx.arc(px, py, 3, 0, Math.PI*2);
+    trajCtx.arc(px, py, 2.5, 0, Math.PI * 2);
     trajCtx.fillStyle = '#00C2FF';
     trajCtx.fill();
   });
+
+  // Peak label
+  const peakDy = maxDy.toFixed(0);
+  trajCtx.fillStyle = 'rgba(0,194,255,.7)';
+  trajCtx.font = '10px monospace';
+  trajCtx.fillText(`+${peakDy}px`, PAD + 2, toY(maxDy) - 4);
 }
 
 /* ═══════════════ Step 3: Parameters ═══════════════ */
@@ -1197,6 +1226,42 @@ function detectRedCrosshairInRect(rect) {
   return _scanRedPixels(x0, y0, w, h, rect.x + rect.w / 2, rect.y + rect.h / 2);
 }
 
+
+/* ═══════════════ Import to gun_search custom config ═══════════════ */
+function importToCustomConfig() {
+  if (!window._calcParams || !window._calcParams.length) { toast('请先点击计算参数'); return; }
+
+  const gunName = document.getElementById('gunNameInput').value.trim() || '未命名枪械';
+  const date    = new Date().toLocaleDateString('zh-CN');
+  const phases  = window._calcParams;
+
+  const makePhase = (p) => ({
+    time: p.time, time_max: p.time_max,
+    delay_min: p.delay_min, delay_max: p.delay_max,
+    x_main: p.x_main, y_main: p.y_main,
+    x_alt: 0, y_alt: 0,
+    interval: p.interval
+  });
+
+  const newCfg = {
+    id:      Date.now().toString(),
+    name:    `${gunName} · 视频分析 ${date}`,
+    gunName: gunName,
+    phase1:  makePhase(phases[0]),
+    phase2:  makePhase(phases[1] || phases[0]),
+    phase3:  makePhase(phases[2] || phases[1] || phases[0])
+  };
+
+  try {
+    const existing = JSON.parse(localStorage.getItem('custom_gun_configs') || '[]');
+    existing.unshift(newCfg); // put at top of list
+    localStorage.setItem('custom_gun_configs', JSON.stringify(existing));
+    toast('✅ 已导入，正在跳转到自定义配置...');
+    setTimeout(() => window.open('gun_search.html#showCustom', '_blank'), 700);
+  } catch(e) {
+    toast('❌ 导入失败：' + e.message);
+  }
+}
 
 /* ═══════════════ Trim range ═══════════════ */
 function setTrimStart() {
