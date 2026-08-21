@@ -1191,35 +1191,40 @@ function saveToCustom() {
   const useN  = parseInt(document.getElementById('useBullets').value) || perBulletDy.length;
   const total = Math.min(useN, perBulletDy.length);
 
-  // Cumulative bullet counts for each phase end (matches device protocol)
-  const cumTime = [s1, Math.min(s2, total), total];
+  // 实测：time=30, interval=10ms → 只压了3发
+  // 推导：3发 × (92ms÷10ms) = 27次补偿 ≈ time=30
+  // 结论：time 是「补偿事件计数（ticks）」，不是子弹数
+  // 正确公式：time_ticks = bullets × (gun_period ÷ interval)
+  const DEVICE_INTERVAL = 10;
+  const gunPeriod = ps[0] ? ps[0].interval : 100;   // gun fire period in ms
+  const subMoves  = Math.max(1, Math.round(gunPeriod / DEVICE_INTERVAL));  // ticks per bullet
 
-  // 固定 interval=16ms（与 S-curve 参考一致）。
-  // 每发子弹内设备补偿次数 = floor(gun_period / 16)，因此
-  // 每次补偿的 y_main_device = y_main_per_bullet / subMoves
-  const DEVICE_INTERVAL = 10;  // 参考配置 interval=10，y_main=2×9次/发≈per-bullet
-  const gunPeriod = ps[0] ? ps[0].interval : 100;   // gun fire period in ms (stored in params.interval)
-  const subMoves  = Math.max(1, Math.round(gunPeriod / DEVICE_INTERVAL));
+  // cumTime in TICKS (not bullets)
+  const cumTime = [
+    Math.round(s1                      * subMoves),
+    Math.round(Math.min(s2, total)     * subMoves),
+    Math.round(total                   * subMoves)
+  ];
 
   const toDeviceYmain = yPerBullet => {
     const v = Math.round(yPerBullet / subMoves);
-    return v === 0 ? Math.sign(yPerBullet) || 1 : v;   // 至少 ±1，方向正确
+    return v === 0 ? (Math.sign(yPerBullet) || 1) : v;   // 至少 ±1，方向正确
   };
 
   const mkPhase = (p, idx) => {
     if (!p) {
       const last = ps[ps.length - 1];
-      return { time: total, time_max: total, delay_min: 8,
+      return { time: cumTime[2], time_max: cumTime[2] + subMoves, delay_min: 8,
                delay_max: 12, x_main: 0, y_main: toDeviceYmain(last.y_main),
                x_alt: 0, y_alt: 0, interval: DEVICE_INTERVAL };
     }
     return {
       time:      cumTime[idx],
-      time_max:  idx === 2 ? cumTime[idx] : cumTime[idx] + 2,
+      time_max:  cumTime[idx] + subMoves,   // +1发的容差
       delay_min: p.delay_min,
       delay_max: p.delay_max,
       x_main:    0,
-      y_main:    toDeviceYmain(p.y_main),  // per-sub-move, × subMoves = per-bullet
+      y_main:    toDeviceYmain(p.y_main),
       x_alt:     0,
       y_alt:     0,
       interval:  DEVICE_INTERVAL
