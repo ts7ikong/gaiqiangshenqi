@@ -795,7 +795,7 @@ function renderResult() {
   }).filter(Boolean);
 
   renderResultCanvas(activeDy, phases, sign, s1, s2);
-  renderScatterCanvas(activeDy, sign, s1, s2);
+  renderScatterCanvas(activeDy, params, sign, s1, s2);
   renderSimCanvas(activeDy, params, sign, s1, s2);
   renderParamsGrid(params);
   document.getElementById('rawDataView').textContent =
@@ -867,7 +867,7 @@ function renderResultCanvas(all, phases, sign, s1, s2) {
 }
 
 /* ── 弹道散布图 ── */
-function renderScatterCanvas(activeDy, sign, s1, s2) {
+function renderScatterCanvas(activeDy, params, sign, s1, s2) {
   const sc   = document.getElementById('scatterCanvas');
   sc.width   = sc.offsetWidth || 420;
   sc.height  = 240;
@@ -876,14 +876,14 @@ function renderScatterCanvas(activeDy, sign, s1, s2) {
   sCtx.clearRect(0, 0, cw, ch);
 
   const n = activeDy.length;
-  if (!n) return;
+  if (!n || !params || !params.length) return;
 
   // Cumulative recoil in device units (positive = gun kicks up = crosshair drifts up)
   let cumY = 0;
   const cumRecoil = activeDy.map(d => { cumY += d * sign * calcScale; return cumY; });
 
   // Cumulative compensation per bullet using computed params
-  const ps = window._calcParams;
+  const ps = params;
   let compAcc = 0;
   const cumComp = activeDy.map((_, i) => {
     let p = i < s1 ? ps[0] : i < s2 ? (ps[1] || ps[0]) : (ps[2] || ps[1] || ps[0]);
