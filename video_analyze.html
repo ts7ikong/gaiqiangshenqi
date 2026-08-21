@@ -212,6 +212,26 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
         <div class="mode-badge mode-mark" id="modeBadge">🖱 点击标记</div>
       </div>
 
+      <!-- 裁剪条 -->
+      <div style="display:flex;align-items:center;gap:8px;padding:6px 0 2px;flex-wrap:wrap;
+          border-top:1px solid var(--border);margin-top:4px">
+        <span style="font-size:.78rem;color:var(--sub);flex-shrink:0">✂️ 分析范围</span>
+        <button class="btn btn-sm" onclick="setTrimStart()"
+          style="font-size:.75rem;padding:4px 10px;color:var(--green);border-color:rgba(0,208,132,.3)">
+          [ 起始帧
+        </button>
+        <div id="trimInfo" style="font-family:monospace;font-size:.75rem;color:var(--sub);
+            background:var(--card2);padding:3px 10px;border-radius:6px;white-space:nowrap">
+          全段
+        </div>
+        <button class="btn btn-sm" onclick="setTrimEnd()"
+          style="font-size:.75rem;padding:4px 10px;color:#FF4757;border-color:rgba(255,71,87,.3)">
+          结束帧 ]
+        </button>
+        <button class="btn btn-sm" id="clearTrimBtn" onclick="clearTrim()"
+          style="display:none;font-size:.72rem;padding:3px 8px;color:var(--sub)">重置</button>
+      </div>
+
       <!-- 进度条（追踪时显示） -->
       <div id="progressBar">
         <div class="prog-track"><div class="prog-inner" id="progInner"></div></div>
@@ -387,6 +407,10 @@ const CROSSHAIR_SEARCH_R = 80; // search radius for red crosshair detection (px)
 let roiRect = null;       // {x, y, w, h} in canvas pixels — null = not set
 let roiDragStart = null;  // {x, y} — null when not dragging
 let isDrawingRoi = false;
+
+// Trim range (frame indices)
+let trimStart = 0;
+let trimEnd   = null; // null = use last frame of video
 
 /* ═══════════════ Step 1: Load ═══════════════ */
 const uploadZone = document.getElementById('uploadZone');
@@ -648,15 +672,16 @@ async function startAutoTrack() {
   document.getElementById('autoBtn').disabled = true;
   document.getElementById('progressBar').style.display = 'block';
 
-  const startFrame = points[0] ? points[0].frameIndex : 0;
+  const startFrame = points[0] ? points[0].frameIndex : trimStart;
   const step       = 2; // process every 2nd frame
   let curX = points.length ? points[points.length-1].x : templateCX;
   let curY = points.length ? points[points.length-1].y : templateCY;
   let f = startFrame + step;
-  const totalF = Math.floor(duration * 60) - startFrame;
+  const endF   = trimEnd !== null ? trimEnd : Math.floor(duration * 60);
+  const totalF = Math.max(1, endF - startFrame);
   let crosshairMissCount = 0;
 
-  while (f <= Math.floor(duration * 60)) {
+  while (f <= endF) {
     await seekFrame(f);
     let foundX = curX, foundY = curY;
 
@@ -682,7 +707,7 @@ async function startAutoTrack() {
     addPoint(foundX, foundY, vid.currentTime, f);
     curX = foundX; curY = foundY;
 
-    const pct = ((f - startFrame) / totalF * 100).toFixed(0);
+    const pct = (Math.min(100, (f - startFrame) / totalF * 100)).toFixed(0);
     document.getElementById('progInner').style.width = pct + '%';
     const modeLabel = trackMode === 'crosshair' ? (crosshairMissCount > 0 ? '(模板回退)' : '准星') : '特征点';
     document.getElementById('progLabel').textContent =
@@ -1021,9 +1046,9 @@ async function oneClickAnalyze() {
   btn.disabled = true;
   trackMode = 'crosshair';
 
-  // Step 1: seek to first frame
-  status.textContent = '⏳ 定位第一帧...';
-  await seekFrame(0);
+  // Step 1: seek to trim start
+  status.textContent = '⏳ 定位起始帧...';
+  await seekFrame(trimStart);
 
   // Step 2: detect red crosshair — use user-drawn ROI first, else scan center
   status.textContent = '🔍 自动检测红色准星...';
@@ -1053,18 +1078,18 @@ async function oneClickAnalyze() {
 
   // Step 3: record the first point
   clearPoints();
-  addPoint(res.x, res.y, vid.currentTime, 0);
+  addPoint(res.x, res.y, vid.currentTime, trimStart);
   captureTemplate(res.x, res.y);
 
-  // Step 4: auto-track all frames
+  // Step 4: auto-track frames within trim range
   document.getElementById('progressBar').style.display = 'block';
   isAutoTracking = true;
   document.getElementById('autoBtn').disabled = true;
 
   const step  = 2;
   let curX = res.x, curY = res.y;
-  let f = step;
-  const totalF = Math.floor(duration * 60);
+  let f = trimStart + step;
+  const totalF = trimEnd !== null ? trimEnd : Math.floor(duration * 60);
   let missCount = 0;
 
   while (f <= totalF) {
@@ -1082,7 +1107,7 @@ async function oneClickAnalyze() {
     addPoint(fx, fy, vid.currentTime, f);
     curX = fx; curY = fy;
 
-    const pct = (f / totalF * 100).toFixed(0);
+    const pct = ((f - trimStart) / Math.max(1, totalF - trimStart) * 100).toFixed(0);
     document.getElementById('progInner').style.width = pct + '%';
     document.getElementById('progLabel').textContent =
       `追踪中 ${pct}%  帧${f}  Δy=${(fy - points[0].y).toFixed(1)}px`;
@@ -1166,6 +1191,35 @@ function detectRedCrosshairInRect(rect) {
   return _scanRedPixels(x0, y0, w, h, rect.x + rect.w / 2, rect.y + rect.h / 2);
 }
 
+
+/* ═══════════════ Trim range ═══════════════ */
+function setTrimStart() {
+  trimStart = currentFrame;
+  if (trimEnd !== null && trimEnd <= trimStart) trimEnd = null;
+  updateTrimInfo();
+  toast(`起始帧已设为 ${trimStart}`);
+}
+
+function setTrimEnd() {
+  trimEnd = currentFrame;
+  if (trimEnd <= trimStart) { toast('结束帧必须在起始帧之后'); trimEnd = null; return; }
+  updateTrimInfo();
+  toast(`结束帧已设为 ${trimEnd}`);
+}
+
+function clearTrim() {
+  trimStart = 0;
+  trimEnd   = null;
+  updateTrimInfo();
+}
+
+function updateTrimInfo() {
+  const endLabel = trimEnd !== null ? trimEnd : `~${Math.floor(duration*60)}`;
+  const hasTrim  = trimStart > 0 || trimEnd !== null;
+  document.getElementById('trimInfo').textContent =
+    hasTrim ? `${trimStart} ~ ${endLabel}` : '全段';
+  document.getElementById('clearTrimBtn').style.display = hasTrim ? 'inline-block' : 'none';
+}
 
 /* ═══════════════ Navigation ═══════════════ */
 function setStep(n) {
