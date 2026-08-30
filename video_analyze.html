@@ -288,7 +288,12 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
       <div class="card">
         <div class="panel-title"><span>弹道轨迹预览</span></div>
         <canvas id="trajCanvas"></canvas>
-        <div class="traj-legend"><span>↑ 准星上移（后座力方向）</span></div>
+        <div class="traj-legend">
+          <span style="color:#00D084">● 起点</span>
+          <span style="color:#00C2FF">— 轨迹</span>
+          <span style="color:#FF3366">● 终点</span>
+          <span style="color:var(--sub)">2D位移图</span>
+        </div>
       </div>
 
       <!-- 基本设置 -->
@@ -407,6 +412,7 @@ let points = [];           // {frameIndex, x, y, t}  -- raw canvas coords
 let templateData = null;   // ImageData patch for auto-track
 let templateCX = 0, templateCY = 0;
 let isAutoTracking = false;
+let suppressDrawFrame = false; // suppresses auto-drawFrame during composite creation
 const TMPL_HALF = 28;      // template half-size (56x56 patch)
 const SEARCH_R  = 50;      // search radius px — tight to prevent false matches
 
@@ -486,16 +492,15 @@ function seekToFrame(f) {
   vid.currentTime = frameToTime(f);
 }
 
-vid.addEventListener('seeked', drawFrame);
+vid.addEventListener('seeked', () => { if (!suppressDrawFrame) drawFrame(); });
 
-function drawFrame() {
-  ctx.drawImage(vid, 0, 0, vc.width, vc.height);
-  // Draw full trajectory trail: connecting line + blue dots + red crosshair on last point
+// Draw trajectory dots+line+ROI on top of whatever is already on canvas
+function drawTrajectoryOnly() {
   if (points.length > 1) {
     ctx.beginPath();
     points.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
-    ctx.strokeStyle = 'rgba(0,208,132,0.5)';
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(0,208,132,0.8)';
+    ctx.lineWidth = 2;
     ctx.stroke();
   }
   points.forEach((p, i) => {
@@ -505,7 +510,6 @@ function drawFrame() {
     ctx.fillStyle = isLast ? '#FF3366' : 'rgba(0,194,255,0.85)';
     ctx.fill();
     if (isLast) {
-      // crosshair ring on current position
       ctx.beginPath();
       ctx.arc(p.x, p.y, 10, 0, Math.PI * 2);
       ctx.strokeStyle = 'rgba(255,51,102,0.6)';
@@ -513,11 +517,10 @@ function drawFrame() {
       ctx.stroke();
     }
   });
-  // draw ROI rectangle if set
   if (roiRect && roiRect.w > 2 && roiRect.h > 2) {
     ctx.save();
     ctx.strokeStyle = 'rgba(0,194,255,0.9)';
-    ctx.lineWidth   = 2;
+    ctx.lineWidth = 2;
     ctx.setLineDash([8, 4]);
     ctx.strokeRect(roiRect.x, roiRect.y, roiRect.w, roiRect.h);
     ctx.fillStyle = 'rgba(0,194,255,0.07)';
@@ -528,7 +531,11 @@ function drawFrame() {
     ctx.fillText('准星区域', roiRect.x + 4, roiRect.y + 16);
     ctx.restore();
   }
-  // overlay
+}
+
+function drawFrame() {
+  ctx.drawImage(vid, 0, 0, vc.width, vc.height);
+  drawTrajectoryOnly();
   document.getElementById('overlay').textContent =
     `帧 ${currentFrame} / ~${Math.floor(duration*60)} · ${vid.currentTime.toFixed(3)}s`;
   document.getElementById('frameInfo').textContent =
@@ -797,7 +804,7 @@ function findTemplate(lastX, lastY) {
   return {x: bestX, y: bestY};
 }
 
-/* ═══════════════ Trajectory preview ═══════════════ */
+/* ═══════════════ Trajectory preview (2D spatial) ═══════════════ */
 function renderTraj() {
   const cw = trajCanvas.width  = trajCanvas.offsetWidth  || 240;
   const ch = trajCanvas.height = trajCanvas.offsetHeight || 240;
@@ -805,52 +812,67 @@ function renderTraj() {
   if (points.length < 2) return;
 
   const base = points[0];
+  const dxs  = points.map(p => p.x - base.x);
   const dys  = points.map(p => p.y - base.y);
-  const minDy = Math.min(0, ...dys);
-  const maxDy = Math.max(1, ...dys);
-  const range = Math.max(1, maxDy - minDy);
-  const PAD   = 14;
 
-  // Map dy to canvas y: largest dy at top, 0 near bottom
-  const toY = dy => ch - PAD - ((dy - minDy) / range) * (ch - PAD * 2);
+  const PAD  = 20;
+  const minX = Math.min(0, ...dxs), maxX = Math.max(0, ...dxs);
+  const minY = Math.min(0, ...dys), maxY = Math.max(0, ...dys);
+  const rangeX = Math.max(1, maxX - minX);
+  const rangeY = Math.max(1, maxY - minY);
+  const scale  = Math.min((cw - PAD*2) / rangeX, (ch - PAD*2) / rangeY) * 0.88;
 
-  // Zero reference line
-  const zeroY = toY(0);
-  trajCtx.strokeStyle = 'rgba(255,255,255,.12)';
+  // Center the path in the canvas
+  const offX = cw/2 - ((minX + maxX) / 2) * scale;
+  const offY = ch/2 - ((minY + maxY) / 2) * scale;
+  const toSX = dx => offX + dx * scale;
+  const toSY = dy => offY + dy * scale;
+
+  // Light grid
+  trajCtx.strokeStyle = 'rgba(255,255,255,.06)';
   trajCtx.lineWidth = 1;
-  trajCtx.setLineDash([4, 4]);
-  trajCtx.beginPath();
-  trajCtx.moveTo(0, zeroY); trajCtx.lineTo(cw, zeroY);
-  trajCtx.stroke();
-  trajCtx.setLineDash([]);
+  for (let i = 1; i < 4; i++) {
+    const gx = cw * i / 4, gy = ch * i / 4;
+    trajCtx.beginPath(); trajCtx.moveTo(gx, 0); trajCtx.lineTo(gx, ch); trajCtx.stroke();
+    trajCtx.beginPath(); trajCtx.moveTo(0, gy); trajCtx.lineTo(cw, gy); trajCtx.stroke();
+  }
 
-  // Curve
-  trajCtx.strokeStyle = 'rgba(0,194,255,.85)';
-  trajCtx.lineWidth   = 2;
+  // Trajectory line
+  trajCtx.strokeStyle = 'rgba(0,194,255,.9)';
+  trajCtx.lineWidth = 2;
   trajCtx.beginPath();
   points.forEach((p, i) => {
-    const px = (i / (points.length - 1)) * (cw - PAD * 2) + PAD;
-    const py = toY(p.y - base.y);
-    i === 0 ? trajCtx.moveTo(px, py) : trajCtx.lineTo(px, py);
+    const sx = toSX(p.x - base.x), sy = toSY(p.y - base.y);
+    i === 0 ? trajCtx.moveTo(sx, sy) : trajCtx.lineTo(sx, sy);
   });
   trajCtx.stroke();
 
-  // Dots (every 5th to avoid clutter)
+  // Numbered dots every 5th
   points.forEach((p, i) => {
     if (i % 5 !== 0 && i !== points.length - 1) return;
-    const px = (i / (points.length - 1)) * (cw - PAD * 2) + PAD;
-    const py = toY(p.y - base.y);
+    const sx = toSX(p.x - base.x), sy = toSY(p.y - base.y);
     trajCtx.beginPath();
-    trajCtx.arc(px, py, 2.5, 0, Math.PI * 2);
-    trajCtx.fillStyle = '#00C2FF';
+    trajCtx.arc(sx, sy, i === points.length - 1 ? 4 : 2.5, 0, Math.PI * 2);
+    trajCtx.fillStyle = i === points.length - 1 ? '#FF3366' : '#00C2FF';
     trajCtx.fill();
   });
 
-  // Peak label
-  const peakDy = maxDy.toFixed(0);
-  trajCtx.fillStyle = 'rgba(0,194,255,.7)';
-  trajCtx.font = '10px monospace';
-  trajCtx.fillText(`+${peakDy}px`, PAD + 2, toY(maxDy) - 4);
+  // Start marker (green)
+  const sx0 = toSX(0), sy0 = toSY(0);
+  trajCtx.beginPath();
+  trajCtx.arc(sx0, sy0, 5, 0, Math.PI * 2);
+  trajCtx.fillStyle = '#00D084';
+  trajCtx.fill();
+  trajCtx.fillStyle = 'rgba(0,208,132,.8)';
+  trajCtx.font = 'bold 9px monospace';
+  trajCtx.fillText('起', sx0 + 7, sy0 + 4);
+
+  // Displacement label at end
+  const lastDx = dxs[dxs.length-1].toFixed(0);
+  const lastDy = dys[dys.length-1].toFixed(0);
+  trajCtx.fillStyle = 'rgba(255,51,102,.8)';
+  trajCtx.font = '9px monospace';
+  trajCtx.fillText(`Δ(${lastDx > 0 ? '+' : ''}${lastDx}, ${lastDy > 0 ? '+' : ''}${lastDy})`, 4, ch - 4);
 }
 
 /* ═══════════════ Step 3: Parameters ═══════════════ */
@@ -1143,8 +1165,37 @@ async function oneClickAnalyze() {
     return;
   }
 
-  status.innerHTML = `✅ 扫描完成，共 ${points.length} 帧找到准星 · 正在计算...`;
-  goToPhase3();
+  // Create composite: blend sampled frames on canvas, then draw trajectory on top
+  status.textContent = '🎨 生成叠加合成图...';
+  const snap = [...points];
+  const sampleStep = Math.max(1, Math.floor(snap.length / 15));
+  const samples = snap.filter((_, i) => i % sampleStep === 0);
+
+  suppressDrawFrame = true;
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, vc.width, vc.height);
+  ctx.globalCompositeOperation = 'screen';
+  ctx.globalAlpha = Math.min(0.9, 1.5 / samples.length);
+
+  for (const p of samples) {
+    vid.currentTime = p.t;
+    await new Promise(res => vid.addEventListener('seeked', res, {once: true}));
+    ctx.drawImage(vid, 0, 0, vc.width, vc.height);
+  }
+
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
+  suppressDrawFrame = false;
+
+  // Draw the full trajectory path on top of the composite
+  drawTrajectoryOnly();
+  renderTraj();
+  updatePointList();
+
+  status.innerHTML = `✅ 共找到 <strong style="color:#00D084">${points.length}</strong> 个准星点，轨迹已显示
+    &nbsp;&nbsp;
+    <button class="btn btn-sm btn-green" onclick="goToPhase3()"
+      style="font-size:.82rem;vertical-align:middle">计算弹道参数 →</button>`;
 }
 
 /* ═══════════════ Tracking mode toggle ═══════════════ */
