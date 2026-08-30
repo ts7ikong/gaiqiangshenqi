@@ -165,7 +165,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
       2. <strong>完全不动鼠标</strong>，直接开枪打完一梭子<br>
       3. 视角不需要正对墙壁，任意角度均可<br>
       4. 拖入视频，点「<strong style="color:#00C2FF">🚀 一键智能分析</strong>」即可<br><br>
-      工具自动识别<strong style="color:#FF3366">红色准星点</strong>定位起始位置，再追踪该位置的<strong style="color:#00C2FF">墙壁纹理</strong>随摄像机后座移动，输出后座力曲线。
+      工具在<strong style="color:#FF3366">每一帧</strong>的画框区域内自动识别<strong style="color:#FF3366">红色准星点</strong>，将所有帧的准星位置叠加，自然形成后座力轨迹。
     </div>
   </div>
   <div id="loadingTip" style="color:var(--accent2);font-size:.88rem;margin-top:20px;display:none">⏳ 正在解析视频...</div>
@@ -407,8 +407,8 @@ let points = [];           // {frameIndex, x, y, t}  -- raw canvas coords
 let templateData = null;   // ImageData patch for auto-track
 let templateCX = 0, templateCY = 0;
 let isAutoTracking = false;
-const TMPL_HALF = 40;      // template half-size (80x80 patch — larger = more unique)
-const SEARCH_R  = 60;      // search radius px — small to prevent false matches on uniform walls
+const TMPL_HALF = 28;      // template half-size (56x56 patch)
+const SEARCH_R  = 50;      // search radius px — tight to prevent false matches
 
 // Tracking mode: 'wall' = track wall feature, 'crosshair' = track red dot
 let trackMode = 'crosshair'; // default: crosshair mode
@@ -1096,112 +1096,54 @@ async function oneClickAnalyze() {
   const btn    = document.getElementById('quickBtn');
   const status = document.getElementById('quickStatus');
   btn.disabled = true;
-  trackMode = 'crosshair';
+  isAutoTracking = true;
+  clearPoints();
 
-  // Step 1: seek to trim start
-  status.textContent = '⏳ 定位起始帧...';
-  await seekFrame(trimStart);
-
-  // Step 2: detect red crosshair — use user-drawn ROI first, else scan center
-  status.textContent = '🔍 自动检测红色准星...';
-  let res;
-  if (roiRect && roiRect.w > 10 && roiRect.h > 10) {
-    res = detectRedCrosshairInRect(roiRect);
-    if (!res.found) {
-      status.innerHTML = '⚠️ 标记区域内未检测到红色准星。请重新在画面上拖拽画出准星区域，或展开「手动模式」。';
-      btn.disabled = false;
-      return;
-    }
-  } else {
-    const scanR = Math.min(vc.width, vc.height) * 0.15;
-    res = detectRedCrosshair(vc.width / 2, vc.height / 2, scanR);
-    if (!res.found) {
-      const res2 = detectRedCrosshair(vc.width / 2, vc.height / 2, vc.height * 0.4);
-      if (!res2.found) {
-        status.innerHTML = '⚠️ 未检测到红色准星。请在视频画面上<strong style="color:#00C2FF">拖拽画出准星所在区域</strong>后再试。';
-        btn.disabled = false;
-        return;
-      }
-      Object.assign(res, res2);
-    }
+  // Must have an ROI
+  if (!roiRect || roiRect.w < 10 || roiRect.h < 10) {
+    status.innerHTML = '⚠️ 请先在画面上<strong style="color:#00C2FF">拖拽画出准星所在区域</strong>，然后再点分析';
+    btn.disabled = false;
+    isAutoTracking = false;
+    return;
   }
 
-  status.innerHTML = `✅ 准星定位 (${res.x.toFixed(0)}, ${res.y.toFixed(0)}) · 追踪墙壁纹理位移...`;
-
-  // Step 3: record the first point
-  clearPoints();
-  addPoint(res.x, res.y, vid.currentTime, trimStart);
-  captureTemplate(res.x, res.y);
-
-  // Step 4: track wall features through all frames via template matching.
-  // The crosshair (HUD overlay) stays at ~screen-center regardless of recoil;
-  // it's the WALL TEXTURE that moves down in the frame as the camera recoils up.
-  // Template matching on the wall patch around the aim point gives the real recoil.
   document.getElementById('progressBar').style.display = 'block';
-  isAutoTracking = true;
   document.getElementById('autoBtn').disabled = true;
 
-  const step  = 2;
-  const MAX_STEP_PX = 25; // max allowed displacement per tracked step
-  let curX = res.x, curY = res.y;
-  let vx = 0, vy = 0; // running velocity estimate
-  let f = trimStart + step;
   const totalF = trimEnd !== null ? trimEnd : Math.floor(duration * 60);
-  let templateAge = 0;
+  let foundCount = 0;
 
-  while (f <= totalF) {
+  status.textContent = '🔍 逐帧扫描红色准星...';
+
+  for (let f = trimStart; f <= totalF; f++) {
     await seekFrame(f);
 
-    // Predict position from last velocity, search around prediction
-    const predX = curX + vx, predY = curY + vy;
-    const tmpl = findTemplate(predX, predY);
-    const dist = Math.hypot(tmpl.x - predX, tmpl.y - predY);
-
-    let nx, ny;
-    if (dist <= MAX_STEP_PX) {
-      // Trust the match
-      nx = tmpl.x; ny = tmpl.y;
-    } else {
-      // Match jumped too far — fall back to velocity prediction
-      nx = predX; ny = predY;
+    // Scan only the user-drawn ROI for red pixels
+    const res = detectRedCrosshairInRect(roiRect);
+    if (res.found) {
+      addPoint(res.x, res.y, vid.currentTime, f);
+      foundCount++;
     }
-
-    // Smooth velocity (low-pass)
-    vx = vx * 0.6 + (nx - curX) * 0.4;
-    vy = vy * 0.6 + (ny - curY) * 0.4;
-    curX = nx; curY = ny;
-
-    // Refresh template periodically
-    templateAge++;
-    if (templateAge >= 8) {
-      captureTemplate(curX, curY);
-      templateAge = 0;
-    }
-
-    addPoint(curX, curY, vid.currentTime, f);
 
     const pct = ((f - trimStart) / Math.max(1, totalF - trimStart) * 100).toFixed(0);
     document.getElementById('progInner').style.width = pct + '%';
     document.getElementById('progLabel').textContent =
-      `追踪中 ${pct}%  帧${f}  Δy=${(curY - points[0].y).toFixed(1)}px`;
-    f += step;
+      `帧 ${f} / ${totalF}  (${pct}%)  已找到 ${foundCount} 帧`;
+
     await new Promise(r => setTimeout(r, 0));
   }
 
   isAutoTracking = false;
   document.getElementById('autoBtn').disabled = false;
   document.getElementById('progressBar').style.display = 'none';
+  btn.disabled = false;
 
   if (points.length < 3) {
-    status.innerHTML = '⚠️ 追踪点数不足，可能准星被遮挡。请手动模式处理。';
-    btn.disabled = false;
+    status.innerHTML = `⚠️ 只在 ${foundCount} 帧找到红色准星，点不足。请检查ROI是否框住了准星，或调整红色阈值。`;
     return;
   }
 
-  status.innerHTML = `✅ 追踪完成，共 ${points.length} 帧 · 正在计算结果...`;
-  btn.disabled = false;
-
-  // Step 5: go straight to results
+  status.innerHTML = `✅ 扫描完成，共 ${points.length} 帧找到准星 · 正在计算...`;
   goToPhase3();
 }
 
