@@ -1141,24 +1141,43 @@ async function oneClickAnalyze() {
   document.getElementById('autoBtn').disabled = true;
 
   const totalF = trimEnd !== null ? trimEnd : Math.floor(duration * 60);
+  const FOLLOW_R = 40; // follow-search radius after initial frame (px)
   let foundCount = 0;
+  let lastX = null, lastY = null; // last detected crosshair position
 
-  status.textContent = '🔍 逐帧扫描红色准星...';
+  status.textContent = '🔍 第1帧定位准星...';
 
   for (let f = trimStart; f <= totalF; f++) {
     await seekFrame(f);
 
-    // Scan only the user-drawn ROI for red pixels
-    const res = detectRedCrosshairInRect(roiRect);
+    let res;
+    if (lastX === null) {
+      // Frame 0: use the user-drawn ROI to locate the initial crosshair
+      res = detectRedCrosshairInRect(roiRect);
+    } else {
+      // Subsequent frames: follow the crosshair from its last known position.
+      // The crosshair moves UPWARD during sustained fire, so expand the search
+      // upward asymmetrically: FOLLOW_R down but 3× that upward.
+      const x0 = Math.max(0, Math.floor(lastX - FOLLOW_R));
+      const y0 = Math.max(0, Math.floor(lastY - FOLLOW_R * 3));
+      const w  = Math.min(FOLLOW_R * 2, vc.width  - x0);
+      const h  = Math.min(FOLLOW_R * 4, vc.height - y0);
+      res = _scanRedPixels(x0, y0, w, h, lastX, lastY);
+    }
+
     if (res.found) {
       addPoint(res.x, res.y, vid.currentTime, f);
+      lastX = res.x;
+      lastY = res.y;
       foundCount++;
     }
+    // If not found, keep lastX/lastY unchanged — next frame searches the same region
 
     const pct = ((f - trimStart) / Math.max(1, totalF - trimStart) * 100).toFixed(0);
     document.getElementById('progInner').style.width = pct + '%';
     document.getElementById('progLabel').textContent =
-      `帧 ${f} / ${totalF}  (${pct}%)  已找到 ${foundCount} 帧`;
+      `帧 ${f} / ${totalF}  (${pct}%)  已找到 ${foundCount} 帧` +
+      (lastX !== null ? `  准星@(${lastX.toFixed(0)},${lastY.toFixed(0)})` : '');
 
     await new Promise(r => setTimeout(r, 0));
   }
