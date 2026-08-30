@@ -202,6 +202,14 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
         <div class="video-overlay" id="overlay">帧 0 / 0 · 0.000s</div>
       </div>
 
+      <!-- 视频拖动条 -->
+      <div style="padding:8px 0 2px">
+        <input type="range" id="videoScrubber" min="0" max="10000" value="0" step="1"
+          style="-webkit-appearance:none;appearance:none;width:100%;height:5px;border-radius:3px;
+            background:var(--border);cursor:pointer;outline:none;accent-color:var(--accent2)"
+          oninput="onScrub(this.value)" onchange="onScrub(this.value)">
+      </div>
+
       <!-- 控制条 -->
       <div class="ctrl-bar">
         <button class="btn btn-sm" onclick="seekDelta(-1)">◀ 上帧</button>
@@ -399,8 +407,8 @@ let points = [];           // {frameIndex, x, y, t}  -- raw canvas coords
 let templateData = null;   // ImageData patch for auto-track
 let templateCX = 0, templateCY = 0;
 let isAutoTracking = false;
-const TMPL_HALF = 18;      // template half-size (36x36 patch)
-const SEARCH_R  = 200;     // search radius px (at original res)
+const TMPL_HALF = 40;      // template half-size (80x80 patch — larger = more unique)
+const SEARCH_R  = 60;      // search radius px — small to prevent false matches on uniform walls
 
 // Tracking mode: 'wall' = track wall feature, 'crosshair' = track red dot
 let trackMode = 'crosshair'; // default: crosshair mode
@@ -525,6 +533,7 @@ function drawFrame() {
     `帧 ${currentFrame} / ~${Math.floor(duration*60)} · ${vid.currentTime.toFixed(3)}s`;
   document.getElementById('frameInfo').textContent =
     `${currentFrame} / ~${Math.floor(duration*60)}`;
+  syncScrubber();
   renderTraj();
 }
 
@@ -533,6 +542,18 @@ function seekDelta(d) {
   if (newF >= 0 && newF <= duration*60) {
     seekToFrame(newF);
   }
+}
+
+function onScrub(val) {
+  if (isAutoTracking) return;
+  const f = Math.round((val / 10000) * Math.floor(duration * 60));
+  seekToFrame(f);
+}
+
+function syncScrubber() {
+  const total = Math.floor(duration * 60);
+  document.getElementById('videoScrubber').value =
+    total > 0 ? Math.round((currentFrame / total) * 10000) : 0;
 }
 
 // Keyboard nav
@@ -1121,21 +1142,38 @@ async function oneClickAnalyze() {
   document.getElementById('autoBtn').disabled = true;
 
   const step  = 2;
+  const MAX_STEP_PX = 25; // max allowed displacement per tracked step
   let curX = res.x, curY = res.y;
+  let vx = 0, vy = 0; // running velocity estimate
   let f = trimStart + step;
   const totalF = trimEnd !== null ? trimEnd : Math.floor(duration * 60);
-  let templateAge = 0; // frames since last template refresh
+  let templateAge = 0;
 
   while (f <= totalF) {
     await seekFrame(f);
 
-    // Track wall features (not crosshair) so camera movement = recoil is captured
-    const tmpl = findTemplate(curX, curY);
-    curX = tmpl.x; curY = tmpl.y;
+    // Predict position from last velocity, search around prediction
+    const predX = curX + vx, predY = curY + vy;
+    const tmpl = findTemplate(predX, predY);
+    const dist = Math.hypot(tmpl.x - predX, tmpl.y - predY);
 
-    // Refresh template periodically to handle bullet holes accumulating on wall
+    let nx, ny;
+    if (dist <= MAX_STEP_PX) {
+      // Trust the match
+      nx = tmpl.x; ny = tmpl.y;
+    } else {
+      // Match jumped too far — fall back to velocity prediction
+      nx = predX; ny = predY;
+    }
+
+    // Smooth velocity (low-pass)
+    vx = vx * 0.6 + (nx - curX) * 0.4;
+    vy = vy * 0.6 + (ny - curY) * 0.4;
+    curX = nx; curY = ny;
+
+    // Refresh template periodically
     templateAge++;
-    if (templateAge >= 10) {
+    if (templateAge >= 8) {
       captureTemplate(curX, curY);
       templateAge = 0;
     }
