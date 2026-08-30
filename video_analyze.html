@@ -181,7 +181,8 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
     <div style="flex:1">
       <div style="font-size:.95rem;font-weight:700;color:var(--accent2);margin-bottom:3px">🤖 智能准星追踪</div>
       <div id="quickStatus" style="font-size:.78rem;color:var(--sub)">
-        在视频画面上<strong style="color:#00C2FF">拖拽画出准星所在区域</strong>，然后点「🚀 一键智能分析」
+        <strong style="color:#00C2FF">直接点「一键分析」</strong>= 场景追踪，测量镜头旋转（<span style="color:#00D084">推荐</span>）<br>
+        拖拽画出准星区域再分析 = 追踪红色准星点（视觉偏移，约10-30px）
       </div>
     </div>
     <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
@@ -1233,6 +1234,50 @@ function copyParams() {
   navigator.clipboard.writeText(lines).then(() => toast('参数已复制到剪贴板'));
 }
 
+/* ═══════════════ Frame-shift measurement (scene/camera tracking) ═══════════════
+   Compares two consecutive frames to find the vertical displacement of the scene.
+   Uses left + right side strips (avoids center crosshair area) and middle 50%
+   vertically (avoids top/bottom HUD). Returns pixels the world moved downward
+   (positive = camera tilted up).
+══════════════════════════════════════════════════════════════════════════════════ */
+function measureFrameShift(prevData, currData, w, h) {
+  const MAX_DY = 60; // max per-frame camera rotation in pixels (generous)
+  const YSTEP  = 10; // sample every 10 rows
+  const XSTEP  = 28; // sample every 28 columns
+
+  // Avoid center (crosshair/scope) and near edges (HUD)
+  const cx = w / 2;
+  const leftEnd    = Math.floor(cx * 0.55);  // x: 0 .. 52.5% width
+  const rightStart = Math.floor(cx * 1.45);  // x: 72.5% .. 100%
+  const yStart = Math.floor(h * 0.25);
+  const yEnd   = Math.floor(h * 0.75);
+
+  let bestDy = 0, bestSAD = Infinity;
+
+  for (let dy = -MAX_DY; dy <= MAX_DY; dy++) {
+    let sad = 0;
+    for (let y = yStart; y < yEnd - Math.abs(dy); y += YSTEP) {
+      const y2 = y + dy;
+      if (y2 < 0 || y2 >= h) continue;
+      const row1 = y * w, row2 = y2 * w;
+      // Left strip
+      for (let x = 0; x < leftEnd; x += XSTEP) {
+        const i1 = (row1 + x) << 2, i2 = (row2 + x) << 2;
+        sad += Math.abs(prevData[i1]   - currData[i2])
+             + Math.abs(prevData[i1+1] - currData[i2+1]);
+      }
+      // Right strip
+      for (let x = rightStart; x < w; x += XSTEP) {
+        const i1 = (row1 + x) << 2, i2 = (row2 + x) << 2;
+        sad += Math.abs(prevData[i1]   - currData[i2])
+             + Math.abs(prevData[i1+1] - currData[i2+1]);
+      }
+    }
+    if (sad < bestSAD) { bestSAD = sad; bestDy = dy; }
+  }
+  return bestDy;
+}
+
 /* ═══════════════ One-click intelligent analyze ═══════════════ */
 async function oneClickAnalyze() {
   if (isAutoTracking) return;
@@ -1255,45 +1300,66 @@ async function oneClickAnalyze() {
   document.getElementById('autoBtn').disabled = true;
 
   const totalF = trimEnd !== null ? trimEnd : Math.floor(duration * 60);
-  const FOLLOW_R = 40; // follow-search radius after initial frame (px)
+  const hasRoi = roiRect && roiRect.w >= 10 && roiRect.h >= 10;
   let foundCount = 0;
-  let lastX = null, lastY = null; // last detected crosshair position
 
-  status.textContent = '🔍 第1帧定位准星...';
+  if (hasRoi) {
+    // ── 准星追踪：追踪屏幕上的红色准星点（视觉后坐力，位移量小）──
+    status.textContent = '🔴 准星追踪：定位红色准星...';
+    const FOLLOW_R = 40;
+    let lastX = null, lastY = null;
 
-  for (let f = trimStart; f <= totalF; f++) {
-    await seekFrame(f);
-
-    let res;
-    if (lastX === null) {
-      // Frame 0: use the user-drawn ROI to locate the initial crosshair
-      res = detectRedCrosshairInRect(roiRect);
-    } else {
-      // Subsequent frames: follow the crosshair from its last known position.
-      // The crosshair moves UPWARD during sustained fire, so expand the search
-      // upward asymmetrically: FOLLOW_R down but 3× that upward.
-      const x0 = Math.max(0, Math.floor(lastX - FOLLOW_R));
-      const y0 = Math.max(0, Math.floor(lastY - FOLLOW_R * 3));
-      const w  = Math.min(FOLLOW_R * 2, vc.width  - x0);
-      const h  = Math.min(FOLLOW_R * 4, vc.height - y0);
-      res = _scanRedPixels(x0, y0, w, h, lastX, lastY);
+    for (let f = trimStart; f <= totalF; f++) {
+      await seekFrame(f);
+      let res;
+      if (lastX === null) {
+        res = detectRedCrosshairInRect(roiRect);
+      } else {
+        const x0 = Math.max(0, Math.floor(lastX - FOLLOW_R));
+        const y0 = Math.max(0, Math.floor(lastY - FOLLOW_R * 3));
+        const w  = Math.min(FOLLOW_R * 2, vc.width  - x0);
+        const h  = Math.min(FOLLOW_R * 4, vc.height - y0);
+        res = _scanRedPixels(x0, y0, w, h, lastX, lastY);
+      }
+      if (res.found) {
+        addPoint(res.x, res.y, vid.currentTime, f);
+        lastX = res.x; lastY = res.y; foundCount++;
+      }
+      const pct = ((f - trimStart) / Math.max(1, totalF - trimStart) * 100).toFixed(0);
+      document.getElementById('progInner').style.width = pct + '%';
+      document.getElementById('progLabel').textContent =
+        `准星追踪 ${pct}% · 帧${f} · 找到${foundCount}帧` +
+        (lastX !== null ? ` · 准星@(${lastX.toFixed(0)},${lastY.toFixed(0)})` : '');
+      await new Promise(r => setTimeout(r, 0));
     }
 
-    if (res.found) {
-      addPoint(res.x, res.y, vid.currentTime, f);
-      lastX = res.x;
-      lastY = res.y;
+  } else {
+    // ── 场景追踪：逐帧对比画面偏移，测量镜头旋转量（完整后座力）──
+    // 相邻帧做条带SAD匹配，左右两侧避开准心区域，上下25%-75%避开HUD
+    status.textContent = '🎥 场景追踪：测量镜头旋转...';
+    const baseX = vc.width / 2, baseY = vc.height / 2;
+    let cumShift = 0;
+    let prevData = null;
+
+    for (let f = trimStart; f <= totalF; f++) {
+      await seekFrame(f);
+      const currData = ctx.getImageData(0, 0, vc.width, vc.height).data;
+
+      if (prevData !== null) {
+        const dy = measureFrameShift(prevData, currData, vc.width, vc.height);
+        cumShift += dy;
+      }
+      // Camera tilts UP → world moves DOWN → cumShift grows positive → point y goes UP (decreases)
+      addPoint(baseX, baseY - cumShift, vid.currentTime, f);
       foundCount++;
+
+      const pct = ((f - trimStart) / Math.max(1, totalF - trimStart) * 100).toFixed(0);
+      document.getElementById('progInner').style.width = pct + '%';
+      document.getElementById('progLabel').textContent =
+        `场景追踪 ${pct}% · 帧${f} · 累计偏移 ${cumShift.toFixed(1)}px`;
+      prevData = currData;
+      await new Promise(r => setTimeout(r, 0));
     }
-    // If not found, keep lastX/lastY unchanged — next frame searches the same region
-
-    const pct = ((f - trimStart) / Math.max(1, totalF - trimStart) * 100).toFixed(0);
-    document.getElementById('progInner').style.width = pct + '%';
-    document.getElementById('progLabel').textContent =
-      `帧 ${f} / ${totalF}  (${pct}%)  已找到 ${foundCount} 帧` +
-      (lastX !== null ? `  准星@(${lastX.toFixed(0)},${lastY.toFixed(0)})` : '');
-
-    await new Promise(r => setTimeout(r, 0));
   }
 
   isAutoTracking = false;
@@ -1302,7 +1368,7 @@ async function oneClickAnalyze() {
   btn.disabled = false;
 
   if (points.length < 3) {
-    status.innerHTML = `⚠️ 只在 ${foundCount} 帧找到红色准星，点不足。请检查ROI是否框住了准星，或调整红色阈值。`;
+    status.innerHTML = `⚠️ 采集到的帧数不足（${foundCount}帧）。请检查分析范围或视频格式。`;
     return;
   }
 
@@ -1312,7 +1378,9 @@ async function oneClickAnalyze() {
   renderTraj();
   updatePointList();
 
-  status.innerHTML = `✅ 共找到 <strong style="color:#00D084">${points.length}</strong> 个准星点
+  const modeLabel = hasRoi ? '🔴 准星追踪' : '🎥 场景追踪';
+  const totalDy = points.length > 1 ? Math.abs(points[points.length-1].y - points[0].y).toFixed(1) : '0';
+  status.innerHTML = `✅ ${modeLabel} · ${points.length}帧 · 总位移 <strong style="color:#00D084">${totalDy}px</strong>
     &nbsp;&nbsp;
     <button class="btn btn-sm" onclick="showTrajectoryResult()" style="font-size:.78rem">🔍 重新显示弹道</button>
     &nbsp;
