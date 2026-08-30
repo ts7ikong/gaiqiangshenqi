@@ -531,6 +531,110 @@ function drawTrajectoryOnly() {
   }
 }
 
+// Show last video frame ZOOMED to trajectory area, with all points drawn at scale
+async function showTrajectoryResult() {
+  if (!points.length) return;
+  suppressDrawFrame = true;
+  vid.currentTime = points[points.length - 1].t;
+  await new Promise(res => vid.addEventListener('seeked', res, {once: true}));
+
+  // Bounding box of all trajectory points
+  const xs = points.map(p => p.x), ys = points.map(p => p.y);
+  const bx  = Math.min(...xs), bx2 = Math.max(...xs);
+  const by  = Math.min(...ys), by2 = Math.max(...ys);
+  const bcx = (bx + bx2) / 2,  bcy = (by + by2) / 2;
+
+  // Zoom region: at least 300px wide/tall in video coords, trajectory extent × 5 margin
+  const halfW = Math.max(300, (bx2 - bx) * 5 + 120);
+  const halfH = Math.max(300, (by2 - by) * 5 + 120);
+  const zx = Math.max(0, Math.round(bcx - halfW));
+  const zy = Math.max(0, Math.round(bcy - halfH));
+  const zw = Math.min(vc.width  - zx, Math.round(halfW * 2));
+  const zh = Math.min(vc.height - zy, Math.round(halfH * 2));
+
+  // Draw zoomed region to fill canvas
+  ctx.drawImage(vid, zx, zy, zw, zh, 0, 0, vc.width, vc.height);
+  suppressDrawFrame = false;
+
+  const scX = vc.width / zw, scY = vc.height / zh;
+  const sp = points.map(p => ({ x: (p.x - zx) * scX, y: (p.y - zy) * scY }));
+
+  // Purple connecting line with glow
+  ctx.save();
+  ctx.shadowColor = 'rgba(139,92,255,0.85)';
+  ctx.shadowBlur = 14;
+  ctx.beginPath();
+  sp.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+  ctx.strokeStyle = 'rgba(139,92,255,0.9)';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  ctx.restore();
+
+  // All dots (small, purple)
+  sp.forEach((p, i) => {
+    if (i === 0 || i === sp.length - 1) return;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(180,140,255,0.75)';
+    ctx.fill();
+  });
+
+  // Start dot (green, labeled S)
+  ctx.beginPath();
+  ctx.arc(sp[0].x, sp[0].y, 10, 0, Math.PI * 2);
+  ctx.fillStyle = '#00D084';
+  ctx.fill();
+  ctx.fillStyle = '#000';
+  ctx.font = 'bold 11px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('S', sp[0].x, sp[0].y + 4);
+
+  // End dot (red, labeled E)
+  const ep = sp[sp.length - 1];
+  ctx.beginPath();
+  ctx.arc(ep.x, ep.y, 10, 0, Math.PI * 2);
+  ctx.fillStyle = '#FF3366';
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.fillText('E', ep.x, ep.y + 4);
+  ctx.textAlign = 'left';
+
+  // Ring around end point
+  ctx.beginPath();
+  ctx.arc(ep.x, ep.y, 20, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(255,51,102,0.5)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Minimap: full frame in top-right corner with zoom region highlighted
+  const MW = 200, MH = Math.round(200 * vc.height / vc.width);
+  const MX = vc.width - MW - 16, MY = 16;
+  ctx.drawImage(vid, MX, MY, MW, MH);
+  ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(MX, MY, MW, MH);
+  ctx.strokeStyle = '#FF3366';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(
+    MX + (zx / vc.width)  * MW,
+    MY + (zy / vc.height) * MH,
+    (zw / vc.width)  * MW,
+    (zh / vc.height) * MH
+  );
+  ctx.fillStyle = 'rgba(0,0,0,0.65)';
+  ctx.fillRect(MX, MY + MH + 2, MW, 18);
+  ctx.fillStyle = 'rgba(255,255,255,0.75)';
+  ctx.font = '11px sans-serif';
+  ctx.fillText('准星轨迹位置（红框）', MX + 4, MY + MH + 14);
+
+  // Zoom level label
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(10, vc.height - 28, 180, 22);
+  ctx.fillStyle = 'rgba(0,194,255,0.9)';
+  ctx.font = 'bold 12px sans-serif';
+  ctx.fillText(`🔍 放大 ${(vc.width / zw).toFixed(1)}× · S=开始 E=结束`, 14, vc.height - 12);
+}
+
 function drawFrame() {
   ctx.drawImage(vid, 0, 0, vc.width, vc.height);
   drawTrajectoryOnly();
@@ -1202,22 +1306,16 @@ async function oneClickAnalyze() {
     return;
   }
 
-  // Show last frame as background, draw all trajectory points on top
+  // Show zoomed trajectory view
   status.textContent = '🎨 绘制弹道...';
-  suppressDrawFrame = true;
-  const lastPoint = points[points.length - 1];
-  vid.currentTime = lastPoint.t;
-  await new Promise(res => vid.addEventListener('seeked', res, {once: true}));
-  ctx.drawImage(vid, 0, 0, vc.width, vc.height);
-  suppressDrawFrame = false;
-
-  // Draw the full trajectory path on top of the last frame
-  drawTrajectoryOnly();
+  await showTrajectoryResult();
   renderTraj();
   updatePointList();
 
-  status.innerHTML = `✅ 共找到 <strong style="color:#00D084">${points.length}</strong> 个准星点，轨迹已显示
+  status.innerHTML = `✅ 共找到 <strong style="color:#00D084">${points.length}</strong> 个准星点
     &nbsp;&nbsp;
+    <button class="btn btn-sm" onclick="showTrajectoryResult()" style="font-size:.78rem">🔍 重新显示弹道</button>
+    &nbsp;
     <button class="btn btn-sm btn-green" onclick="goToPhase3()"
       style="font-size:.82rem;vertical-align:middle">计算弹道参数 →</button>`;
 }
