@@ -805,8 +805,9 @@ function findTemplate(lastX, lastY) {
 /* ═══════════════ Trajectory preview ═══════════════
    X axis = frame index (time →)
    Y axis = vertical displacement from first frame, FLIPPED so "upward recoil" → top of canvas
-   Smoothed with a 5-frame moving average to suppress per-frame jitter.
-   Minimum y-range = 30px so tiny noise never fills the whole canvas.
+   Uses double-pass Gaussian smoothing (σ=7, window ±14 frames) to suppress
+   per-shot kick/recovery oscillation and show the overall recoil trend.
+   Minimum y-range = 50px so tiny movements never fill the whole canvas.
 ════════════════════════════════════════════════════ */
 function renderTraj() {
   const cw = trajCanvas.width  = trajCanvas.offsetWidth  || 240;
@@ -816,24 +817,30 @@ function renderTraj() {
 
   const base = points[0];
 
-  // Raw vertical displacements (upward in screen = negative dy → we negate → positive = up)
+  // Raw vertical displacements (upward on screen = negative dy → negate → positive = up)
   const rawDy = points.map(p => -(p.y - base.y));
 
-  // 5-frame moving average smoothing
-  const W = 5;
-  const smoothed = rawDy.map((_, i) => {
-    const lo = Math.max(0, i - Math.floor(W/2));
-    const hi = Math.min(rawDy.length - 1, i + Math.floor(W/2));
-    let s = 0; for (let j = lo; j <= hi; j++) s += rawDy[j];
-    return s / (hi - lo + 1);
-  });
+  // Gaussian-weighted smoothing: suppresses per-shot oscillation better than box filter
+  const SIGMA = 7, WIN = 14;
+  function gaussSmooth(arr) {
+    return arr.map((_, i) => {
+      let wSum = 0, vSum = 0;
+      const lo = Math.max(0, i - WIN), hi = Math.min(arr.length - 1, i + WIN);
+      for (let j = lo; j <= hi; j++) {
+        const w = Math.exp(-((j - i) ** 2) / (2 * SIGMA * SIGMA));
+        wSum += w; vSum += arr[j] * w;
+      }
+      return vSum / wSum;
+    });
+  }
+  // Double-pass for extra smoothness
+  const smoothed = gaussSmooth(gaussSmooth(rawDy));
 
   const PAD = 18;
   const minV  = Math.min(0, ...smoothed);
   const maxV  = Math.max(0, ...smoothed);
-  // Enforce minimum range so small movements aren't amplified into chaos
-  const range = Math.max(30, maxV - minV);
-  const base0 = minV < 0 ? -minV : 0; // zero-line offset if curve dips below zero
+  // Enforce minimum range — wider than before so per-frame noise never fills the canvas
+  const range = Math.max(50, maxV - minV);
 
   const toX = i  => PAD + (i / Math.max(1, smoothed.length - 1)) * (cw - PAD*2);
   const toY = v  => ch - PAD - ((v - minV) / range) * (ch - PAD*2);
@@ -849,7 +856,7 @@ function renderTraj() {
   trajCtx.setLineDash([]);
 
   // Smoothed trajectory
-  trajCtx.strokeStyle = 'rgba(139,92,255,.95)'; // purple to match canvas
+  trajCtx.strokeStyle = 'rgba(139,92,255,.95)';
   trajCtx.lineWidth = 2.5;
   trajCtx.beginPath();
   smoothed.forEach((v, i) => {
@@ -876,11 +883,14 @@ function renderTraj() {
     trajCtx.fillText(`↑${peak.toFixed(1)}px`, toX(peakIdx) + 4, toY(peak) - 4);
   }
 
-  // Axis labels
-  trajCtx.fillStyle = 'rgba(255,255,255,.3)';
+  // Resolution info in corner so user knows coords are in video-resolution space
+  trajCtx.fillStyle = 'rgba(255,255,255,.22)';
   trajCtx.font = '9px monospace';
   trajCtx.fillText('↑ 上移', 2, PAD - 4);
   trajCtx.fillText('帧→', cw - 24, ch - 4);
+  if (vc.width && vc.height) {
+    trajCtx.fillText(`${vc.width}×${vc.height}`, 2, ch - 4);
+  }
 }
 
 /* ═══════════════ Step 3: Parameters ═══════════════ */
@@ -1254,18 +1264,34 @@ function toggleTrackMode() {
 function _scanRedPixels(x0, y0, w, h, fallbackX, fallbackY) {
   if (w <= 0 || h <= 0) return { x: fallbackX, y: fallbackY, found: false };
   const data = ctx.getImageData(x0, y0, w, h).data;
-  let sumX = 0, sumY = 0, count = 0;
+
+  // Collect all red pixels
+  const redPx = [];
   for (let py = 0; py < h; py++) {
     for (let px = 0; px < w; px++) {
       const i = (py * w + px) * 4;
       const r = data[i], g = data[i+1], b = data[i+2];
       if (r > 160 && g < 90 && b < 90 && (r - Math.max(g, b)) > 80) {
-        sumX += (x0 + px); sumY += (y0 + py); count++;
+        redPx.push({ px, py, r });
       }
     }
   }
-  if (count >= 1) return { x: sumX / count, y: sumY / count, found: true };
-  return { x: fallbackX, y: fallbackY, found: false };
+  if (!redPx.length) return { x: fallbackX, y: fallbackY, found: false };
+
+  // If there are multiple disjoint red patches, use the one closest to fallback
+  // (last known position) to avoid jumping to other red UI elements.
+  // Weight each pixel by how close it is to the fallback point.
+  const fx = fallbackX - x0, fy = fallbackY - y0; // fallback in local coords
+  let wSumX = 0, wSumY = 0, wSum = 0;
+  for (const p of redPx) {
+    const dist = Math.hypot(p.px - fx, p.py - fy);
+    // weight = brightness × proximity (1/(1+dist²) style)
+    const w = p.r / (1 + dist * dist * 0.002);
+    wSumX += (x0 + p.px) * w;
+    wSumY += (y0 + p.py) * w;
+    wSum  += w;
+  }
+  return { x: wSumX / wSum, y: wSumY / wSum, found: true };
 }
 
 function detectRedCrosshair(searchCX, searchCY, radius) {
