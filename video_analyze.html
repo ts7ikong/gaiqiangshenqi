@@ -289,10 +289,8 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
         <div class="panel-title"><span>弹道轨迹预览</span></div>
         <canvas id="trajCanvas"></canvas>
         <div class="traj-legend">
-          <span style="color:#00D084">● 起点</span>
-          <span style="color:#00C2FF">— 轨迹</span>
-          <span style="color:#FF3366">● 终点</span>
-          <span style="color:var(--sub)">2D位移图</span>
+          <span style="color:rgba(180,140,255,.9)">— 准星上移曲线</span>
+          <span style="color:var(--sub)">↑ 越高后座越大</span>
         </div>
       </div>
 
@@ -499,19 +497,19 @@ function drawTrajectoryOnly() {
   if (points.length > 1) {
     ctx.beginPath();
     points.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
-    ctx.strokeStyle = 'rgba(0,208,132,0.8)';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(139,92,255,0.95)'; // purple
+    ctx.lineWidth = 2.5;
     ctx.stroke();
   }
   points.forEach((p, i) => {
     const isLast = i === points.length - 1;
     ctx.beginPath();
-    ctx.arc(p.x, p.y, isLast ? 5 : 3, 0, Math.PI * 2);
-    ctx.fillStyle = isLast ? '#FF3366' : 'rgba(0,194,255,0.85)';
+    ctx.arc(p.x, p.y, isLast ? 6 : 3, 0, Math.PI * 2);
+    ctx.fillStyle = isLast ? '#FF3366' : 'rgba(180,140,255,0.85)';
     ctx.fill();
     if (isLast) {
       ctx.beginPath();
-      ctx.arc(p.x, p.y, 10, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, 12, 0, Math.PI * 2);
       ctx.strokeStyle = 'rgba(255,51,102,0.6)';
       ctx.lineWidth = 1.5;
       ctx.stroke();
@@ -804,7 +802,12 @@ function findTemplate(lastX, lastY) {
   return {x: bestX, y: bestY};
 }
 
-/* ═══════════════ Trajectory preview (2D spatial) ═══════════════ */
+/* ═══════════════ Trajectory preview ═══════════════
+   X axis = frame index (time →)
+   Y axis = vertical displacement from first frame, FLIPPED so "upward recoil" → top of canvas
+   Smoothed with a 5-frame moving average to suppress per-frame jitter.
+   Minimum y-range = 30px so tiny noise never fills the whole canvas.
+════════════════════════════════════════════════════ */
 function renderTraj() {
   const cw = trajCanvas.width  = trajCanvas.offsetWidth  || 240;
   const ch = trajCanvas.height = trajCanvas.offsetHeight || 240;
@@ -812,67 +815,72 @@ function renderTraj() {
   if (points.length < 2) return;
 
   const base = points[0];
-  const dxs  = points.map(p => p.x - base.x);
-  const dys  = points.map(p => p.y - base.y);
 
-  const PAD  = 20;
-  const minX = Math.min(0, ...dxs), maxX = Math.max(0, ...dxs);
-  const minY = Math.min(0, ...dys), maxY = Math.max(0, ...dys);
-  const rangeX = Math.max(1, maxX - minX);
-  const rangeY = Math.max(1, maxY - minY);
-  const scale  = Math.min((cw - PAD*2) / rangeX, (ch - PAD*2) / rangeY) * 0.88;
+  // Raw vertical displacements (upward in screen = negative dy → we negate → positive = up)
+  const rawDy = points.map(p => -(p.y - base.y));
 
-  // Center the path in the canvas
-  const offX = cw/2 - ((minX + maxX) / 2) * scale;
-  const offY = ch/2 - ((minY + maxY) / 2) * scale;
-  const toSX = dx => offX + dx * scale;
-  const toSY = dy => offY + dy * scale;
+  // 5-frame moving average smoothing
+  const W = 5;
+  const smoothed = rawDy.map((_, i) => {
+    const lo = Math.max(0, i - Math.floor(W/2));
+    const hi = Math.min(rawDy.length - 1, i + Math.floor(W/2));
+    let s = 0; for (let j = lo; j <= hi; j++) s += rawDy[j];
+    return s / (hi - lo + 1);
+  });
 
-  // Light grid
-  trajCtx.strokeStyle = 'rgba(255,255,255,.06)';
+  const PAD = 18;
+  const minV  = Math.min(0, ...smoothed);
+  const maxV  = Math.max(0, ...smoothed);
+  // Enforce minimum range so small movements aren't amplified into chaos
+  const range = Math.max(30, maxV - minV);
+  const base0 = minV < 0 ? -minV : 0; // zero-line offset if curve dips below zero
+
+  const toX = i  => PAD + (i / Math.max(1, smoothed.length - 1)) * (cw - PAD*2);
+  const toY = v  => ch - PAD - ((v - minV) / range) * (ch - PAD*2);
+
+  // Zero reference line
+  const zeroY = toY(0);
+  trajCtx.strokeStyle = 'rgba(255,255,255,.15)';
   trajCtx.lineWidth = 1;
-  for (let i = 1; i < 4; i++) {
-    const gx = cw * i / 4, gy = ch * i / 4;
-    trajCtx.beginPath(); trajCtx.moveTo(gx, 0); trajCtx.lineTo(gx, ch); trajCtx.stroke();
-    trajCtx.beginPath(); trajCtx.moveTo(0, gy); trajCtx.lineTo(cw, gy); trajCtx.stroke();
-  }
-
-  // Trajectory line
-  trajCtx.strokeStyle = 'rgba(0,194,255,.9)';
-  trajCtx.lineWidth = 2;
+  trajCtx.setLineDash([4, 4]);
   trajCtx.beginPath();
-  points.forEach((p, i) => {
-    const sx = toSX(p.x - base.x), sy = toSY(p.y - base.y);
-    i === 0 ? trajCtx.moveTo(sx, sy) : trajCtx.lineTo(sx, sy);
+  trajCtx.moveTo(PAD, zeroY); trajCtx.lineTo(cw - PAD, zeroY);
+  trajCtx.stroke();
+  trajCtx.setLineDash([]);
+
+  // Smoothed trajectory
+  trajCtx.strokeStyle = 'rgba(139,92,255,.95)'; // purple to match canvas
+  trajCtx.lineWidth = 2.5;
+  trajCtx.beginPath();
+  smoothed.forEach((v, i) => {
+    const px = toX(i), py = toY(v);
+    i === 0 ? trajCtx.moveTo(px, py) : trajCtx.lineTo(px, py);
   });
   trajCtx.stroke();
 
-  // Numbered dots every 5th
-  points.forEach((p, i) => {
-    if (i % 5 !== 0 && i !== points.length - 1) return;
-    const sx = toSX(p.x - base.x), sy = toSY(p.y - base.y);
+  // Dots every 10th
+  smoothed.forEach((v, i) => {
+    if (i % 10 !== 0 && i !== smoothed.length - 1) return;
     trajCtx.beginPath();
-    trajCtx.arc(sx, sy, i === points.length - 1 ? 4 : 2.5, 0, Math.PI * 2);
-    trajCtx.fillStyle = i === points.length - 1 ? '#FF3366' : '#00C2FF';
+    trajCtx.arc(toX(i), toY(v), i === smoothed.length - 1 ? 4 : 2, 0, Math.PI * 2);
+    trajCtx.fillStyle = i === smoothed.length - 1 ? '#FF3366' : 'rgba(180,140,255,.9)';
     trajCtx.fill();
   });
 
-  // Start marker (green)
-  const sx0 = toSX(0), sy0 = toSY(0);
-  trajCtx.beginPath();
-  trajCtx.arc(sx0, sy0, 5, 0, Math.PI * 2);
-  trajCtx.fillStyle = '#00D084';
-  trajCtx.fill();
-  trajCtx.fillStyle = 'rgba(0,208,132,.8)';
-  trajCtx.font = 'bold 9px monospace';
-  trajCtx.fillText('起', sx0 + 7, sy0 + 4);
+  // Peak label
+  const peak = Math.max(...smoothed);
+  if (peak > 0) {
+    const peakIdx = smoothed.indexOf(peak);
+    trajCtx.fillStyle = 'rgba(180,140,255,.8)';
+    trajCtx.font = '10px monospace';
+    trajCtx.fillText(`↑${peak.toFixed(1)}px`, toX(peakIdx) + 4, toY(peak) - 4);
+  }
 
-  // Displacement label at end
-  const lastDx = dxs[dxs.length-1].toFixed(0);
-  const lastDy = dys[dys.length-1].toFixed(0);
-  trajCtx.fillStyle = 'rgba(255,51,102,.8)';
+  // Axis labels
+  trajCtx.fillStyle = 'rgba(255,255,255,.3)';
   trajCtx.font = '9px monospace';
-  trajCtx.fillText(`Δ(${lastDx > 0 ? '+' : ''}${lastDx}, ${lastDy > 0 ? '+' : ''}${lastDy})`, 4, ch - 4);
+  trajCtx.fillText('↑ 上移', 2, PAD - 4);
+  trajCtx.fillText('帧→', cw - 24, ch - 4);
 }
 
 /* ═══════════════ Step 3: Parameters ═══════════════ */
